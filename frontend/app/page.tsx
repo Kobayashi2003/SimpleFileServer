@@ -2080,9 +2080,13 @@ function FileExplorerContent() {
           }
           break;
         case ' ': // Use space to quick select
-          if (isSelecting && focusedFileIndex !== null && accumulatedFiles[focusedFileIndex]) {
+          if (focusedFileIndex !== null && accumulatedFiles[focusedFileIndex]) {
             e.preventDefault(); // Prevent page scroll
-            handleQuickSelect(accumulatedFiles[focusedFileIndex].path);
+            if (isSelecting) {
+              handleQuickSelect(accumulatedFiles[focusedFileIndex].path);
+            } else {
+              handleFileClick(accumulatedFiles[focusedFileIndex].path, accumulatedFiles[focusedFileIndex].mimeType || 'application/octet-stream', accumulatedFiles[focusedFileIndex].isDirectory);
+            }
           }
           break;
       }
@@ -2834,7 +2838,7 @@ function FileExplorerContent() {
                       <Button variant="outline" size="sm" className="justify-start" onClick={() => setUseMasonry(!useMasonry)}>
                         <ImageIcon size={18} /> {useMasonry ? 'Disable Masonry' : 'Enable Masonry'}
                       </Button>
-                      <Button variant="outline" size="sm" className="justify-start md:hidden" onClick={() => setShowDirectoryCovers(!showDirectoryCovers)}>
+                      <Button variant="outline" size="sm" className="justify-start" onClick={() => setShowDirectoryCovers(!showDirectoryCovers)}>
                         <ImageIcon size={18} /> {showDirectoryCovers ? 'Hide Directory Covers' : 'Show Directory Covers'}
                       </Button>
 

@@ -33,3 +33,5 @@ Node.js v24.1.0
 [nodemon] app crashed - waiting for file changes before starting...
 
 这个问题会出现在生成压缩包文件时，需要优化
+
+## thumbnail的生成有路径的bug

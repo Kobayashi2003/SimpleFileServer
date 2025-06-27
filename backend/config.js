@@ -29,7 +29,7 @@ module.exports = {
   uploadCountLimit: process.env.UPLOAD_COUNT_LIMIT || 10,
   uploadSizeLimit: process.env.UPLOAD_SIZE_LIMIT || 1024 * 1024 * 100, // 100MB
 
-  contentMaxSize: process.env.CONTENT_MAX_SIZE || 5 * 1024 * 1024, // 5MB
+  contentMaxSize: process.env.CONTENT_MAX_SIZE || 5 * 1024 * 1024 * 1024, // 5GB
 
   generateThumbnail: process.env.GENERATE_THUMBNAIL === 'true' || false,
   thumbnailCacheDir: process.env.THUMBNAIL_CACHE_DIR || path.join(TMP_DIR, 'thumbnails'),
