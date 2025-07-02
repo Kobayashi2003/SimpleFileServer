@@ -6,19 +6,18 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-const TMP_DIR = path.join(os.tmpdir(), 'simple-file-server');
+process.env.NO_CONFIG_WARNING = 'true';
+process.env.SUPPRESS_NO_CONFIG_WARNING = 'true';
+
 const BASE_DIR = process.env.BASE_DIRECTORY || 'D:/Temp';
-const DB_NAME = crypto.createHash('sha256').update(BASE_DIR.endsWith('/') ? BASE_DIR.slice(0, -1) : BASE_DIR).digest('hex') + '.db';
+const TMP_DIR = path.join(os.tmpdir(), 'simple-file-server');
 
-if (!fs.existsSync(TMP_DIR)) {
-  fs.mkdirSync(TMP_DIR, { recursive: true });
-}
-
-module.exports = {
+const config = {
 
   port: process.env.PORT || 11073,
 
   baseDirectory: BASE_DIR,
+  tempDirectory: TMP_DIR,
   logsDirectory: process.env.LOG_DIRECTORY || 'logs',
 
   // Background image path - can be absolute or relative to server root
@@ -53,7 +52,9 @@ module.exports = {
   
   // File indexing options
   useFileIndex: process.env.USE_FILE_INDEX === 'true' || false,
-  fileIndexPath: process.env.FILE_INDEX_PATH || path.join(TMP_DIR, DB_NAME),
+  fileIndexPath: process.env.FILE_INDEX_PATH || path.join(TMP_DIR, 
+    crypto.createHash('sha256').update(BASE_DIR.endsWith('/') ? BASE_DIR.slice(0, -1) : BASE_DIR).digest('hex') + '.db'
+  ),
   rebuildIndexOnStartup: process.env.REBUILD_INDEX_ON_STARTUP === 'true' || false,
   countFilesBatchSize: parseInt(process.env.COUNT_FILES_BATCH_SIZE) || 100,
   indexBatchSize: parseInt(process.env.INDEX_BATCH_SIZE) || 100,
@@ -95,3 +96,72 @@ module.exports = {
       },
 
 }
+
+const originalStdoutWrite = process.stdout.write;
+process.stdout.write = (chunk, encoding, callback) => {
+  const date = new Date().toISOString();
+  return originalStdoutWrite.call(process.stdout, `[${date}] ${chunk}`, encoding, callback);
+};
+
+const originalStderrWrite = process.stderr.write;
+process.stderr.write = (chunk, encoding, callback) => {
+  const date = new Date().toISOString();
+  return originalStderrWrite.call(process.stderr, `[${date}] ${chunk}`, encoding, callback);
+};
+
+process
+  .on('uncaughtException', (error, origin) => {
+    const errorTime = new Date().toISOString();
+    const errorLog = `
+    ====== Uncaught Exception at ${errorTime} ======
+    Origin: ${origin}
+    Error: ${error}
+    Stack: ${error.stack}
+    ================================================
+    `;
+
+    fs.appendFileSync(path.join(config.logsDirectory, 'crash.log'), errorLog);
+    console.error(`[${errorTime}] Uncaught Exception:`, error);
+    // exit if the error is not recoverable
+    if (!utils.isRecoverableError(error)) {
+      process.exit(1);
+    }
+  })
+  .on('unhandledRejection', (reason, promise) => {
+    const errorTime = new Date().toISOString();
+    const errorLog = `
+    ====== Unhandled Rejection at ${errorTime} ======
+    Promise: ${promise}
+    Reason: ${reason}
+    ${reason.stack ? `Stack: ${reason.stack}` : ''}
+    ================================================
+    `;
+
+    fs.appendFileSync(path.join(config.logsDirectory, 'rejections.log'), errorLog);
+    console.error(`[${errorTime}] Unhandled Rejection:`, reason);
+  });
+
+
+if (!fs.existsSync(config.baseDirectory)) {
+  fs.mkdirSync(config.baseDirectory, { recursive: true });
+}
+
+if (!fs.existsSync(config.tempDirectory)) {
+  fs.mkdirSync(config.tempDirectory, { recursive: true });
+}
+
+if (!fs.existsSync(config.logsDirectory)) {
+  fs.mkdirSync(config.logsDirectory, { recursive: true });
+}
+
+if (config.generateThumbnail && !fs.existsSync(config.thumbnailCacheDir)) {
+  fs.mkdirSync(config.thumbnailCacheDir, { recursive: true });
+}
+
+if (config.processPsd && !fs.existsSync(config.psdCacheDir)) {
+  fs.mkdirSync(config.psdCacheDir, { recursive: true });
+}
+
+
+
+module.exports = config;

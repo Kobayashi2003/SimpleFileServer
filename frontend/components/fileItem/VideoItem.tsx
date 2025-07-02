@@ -79,7 +79,7 @@ export function VideoItem({ alt, thumbnail, fit = 'contain', loading = 'lazy', o
       {/* Display Icon */}
       <div className="inset-0 absolute z-20 flex items-center justify-center pointer-events-none">
         <div className="p-3 rounded-full bg-black/40 transform group-hover:scale-110 transition-transform duration-300">
-          <Play className="h-8 w-8 text-white" fill="white" />
+          <Play className="h-8 w-8 text-white" />
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { formatFileSize, getPreviewType } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Folder, File, FileText, FileArchive, Image, Music, Video } from "lucide-react";
+import { Folder, File, FileText, FileArchive, Image, Music, Video, Book, BookOpen } from "lucide-react";
 
 interface FileItemProps {
   name: string;
@@ -27,9 +27,10 @@ export function FileItemListView(
       case 'image': return Image;
       case 'video': return Video;
       case 'audio': return Music;
-      case 'text': case 'pdf': case 'epub': return FileText;
+      case 'text': case 'pdf': return FileText;
       // case 'archive': return FileArchive;
-      case 'comic': return FileArchive;
+      case 'epub': return Book;
+      case 'comic': return BookOpen;
       default: return File;
     }
   };

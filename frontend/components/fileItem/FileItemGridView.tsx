@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { formatFileSize, getPreviewType } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Folder, FolderOpen, File, FileText, FileArchive, Image, Music, Video, BookOpen } from "lucide-react";
+import { Folder, FolderOpen, File, FileText, FileArchive, Image, Music, Video, BookOpen, Book } from "lucide-react";
 
 interface FileItemProps {
   name: string;
@@ -28,7 +28,8 @@ export function FileItemGridView(
       case 'image': return Image;
       case 'video': return Video;
       case 'audio': return Music;
-      case 'text': case 'pdf': case 'epub': return FileText;
+      case 'text': case 'pdf': return FileText;
+      case 'epub': return Book;
       // case 'archive': return FileArchive;
       case 'comic': return BookOpen;
       default: return File;

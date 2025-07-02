@@ -1,10 +1,10 @@
+const config = require('./config')
 const express = require('express');
 const os = require('os');
 const fs = require('fs')
 const path = require('path')
 const cors = require('cors')
 const utils = require('./utils');
-const config = require('./config')
 // handle zip and rar files
 const AdmZip = require('adm-zip')
 const unrar = require('node-unrar-js');
@@ -22,73 +22,9 @@ const { Worker, isMainThread, parentPort, workerData } = require('worker_threads
 const { execSync } = require('child_process');
 const crypto = require('crypto');
 const PSD = require('psd');
-
+// limit the concurrency of file read
 const pLimit = require('p-limit').default;
 const fileReadLimit = pLimit(100);
-
-// Create logs directory if it doesn't exist
-if (!fs.existsSync(config.logsDirectory)) {
-  fs.mkdirSync(config.logsDirectory, { recursive: true });
-}
-
-// Create thumbnail cache directory if it doesn't exist
-if (config.generateThumbnail && !fs.existsSync(config.thumbnailCacheDir)) {
-  fs.mkdirSync(config.thumbnailCacheDir, { recursive: true });
-}
-
-// Create PSD cache directory if it doesn't exist
-if (config.processPsd && !fs.existsSync(config.psdCacheDir)) {
-  fs.mkdirSync(config.psdCacheDir, { recursive: true });
-}
-
-process.env.NO_CONFIG_WARNING = 'true';
-process.env.SUPPRESS_NO_CONFIG_WARNING = 'true';
-
-const originalStdoutWrite = process.stdout.write;
-process.stdout.write = (chunk, encoding, callback) => {
-  const date = new Date().toISOString();
-  return originalStdoutWrite.call(process.stdout, `[${date}] ${chunk}`, encoding, callback);
-};
-
-const originalStderrWrite = process.stderr.write;
-process.stderr.write = (chunk, encoding, callback) => {
-  const date = new Date().toISOString();
-  return originalStderrWrite.call(process.stderr, `[${date}] ${chunk}`, encoding, callback);
-};
-
-process
-  .on('uncaughtException', (error, origin) => {
-    const errorTime = new Date().toISOString();
-    const errorLog = `
-    ====== Uncaught Exception at ${errorTime} ======
-    Origin: ${origin}
-    Error: ${error}
-    Stack: ${error.stack}
-    ================================================
-    `;
-
-    fs.appendFileSync(path.join(config.logsDirectory, 'crash.log'), errorLog);
-    console.error(`[${errorTime}] Uncaught Exception:`, error);
-    // exit if the error is not recoverable
-    if (!utils.isRecoverableError(error)) {
-      process.exit(1);
-    }
-  })
-  .on('unhandledRejection', (reason, promise) => {
-    const errorTime = new Date().toISOString();
-    const errorLog = `
-    ====== Unhandled Rejection at ${errorTime} ======
-    Promise: ${promise}
-    Reason: ${reason}
-    ${reason.stack ? `Stack: ${reason.stack}` : ''}
-    ================================================
-    `;
-
-    fs.appendFileSync(path.join(config.logsDirectory, 'rejections.log'), errorLog);
-    console.error(`[${errorTime}] Unhandled Rejection:`, reason);
-  });
-
-
 
 const app = express();
 const PORT = config.port;
@@ -1000,14 +936,15 @@ app.get('/api/thumbnail', async (req, res) => {
             // Use the processed file to generate thumbnail with Sharp
             const sharp = require('sharp');
 
-            // Cache mechanism: generate cache path
+            // Cache mechanism: generate cache path using hash
             const cacheDir = config.thumbnailCacheDir || path.join(os.tmpdir(), 'thumbnails');
             if (!fs.existsSync(cacheDir)) {
               fs.mkdirSync(cacheDir, { recursive: true });
             }
 
-            // Create cache filename for the processed PSD
-            const cacheKey = `psd_${Buffer.from(fullPath).toString('base64').replace(/[=]/g, '').replace(/[\\/]/g, '_')}_w${width}_${height || 'auto'}_q${quality}`;
+            // Create cache filename using hash - include file path, modification time, and thumbnail parameters
+            const hashInput = `${fullPath}-${stats.mtimeMs}-w${width}-h${height || 'auto'}-q${quality}`;
+            const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
             const cachePath = path.join(cacheDir, `${cacheKey}.jpg`);
 
             // If cache exists, return cached thumbnail directly
@@ -1051,14 +988,15 @@ app.get('/api/thumbnail', async (req, res) => {
         return fs.createReadStream(fullPath).pipe(res);
       }
 
-      // Cache mechanism: generate cache path
+      // Cache mechanism: generate cache path using hash
       const cacheDir = config.thumbnailCacheDir || path.join(os.tmpdir(), 'thumbnails');
       if (!fs.existsSync(cacheDir)) {
         fs.mkdirSync(cacheDir, { recursive: true });
       }
 
-      // Create cache filename (based on original path, width, height and quality)
-      const cacheKey = `${Buffer.from(fullPath).toString('base64').replace(/[=]/g, '').replace(/[\\/]/g, '_')}_w${width}_${height || 'auto'}_q${quality}`;
+      // Create cache filename using hash - include file path, modification time, and thumbnail parameters
+      const hashInput = `${fullPath}-${stats.mtimeMs}-w${width}-h${height || 'auto'}-q${quality}`;
+      const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
       const cachePath = path.join(cacheDir, `${cacheKey}.jpg`);
 
       // If cache exists, return cached thumbnail directly
@@ -1099,14 +1037,15 @@ app.get('/api/thumbnail', async (req, res) => {
       transformer.pipe(res);
     } else if (mimeType.startsWith('video/')) {
 
-      // Cache mechanism: generate cache path
+      // Cache mechanism: generate cache path using hash
       const cacheDir = config.thumbnailCacheDir || path.join(os.tmpdir(), 'thumbnails');
       if (!fs.existsSync(cacheDir)) {
         fs.mkdirSync(cacheDir, { recursive: true });
       }
 
-      // Create cache filename (based on original path, width, height and quality)
-      const cacheKey = `${Buffer.from(fullPath).toString('base64')}_w${width}_${height || 'auto'}_q${quality}`;
+      // Create cache filename using hash - include file path, modification time, and thumbnail parameters
+      const hashInput = `${fullPath}-${stats.mtimeMs}-w${width}-h${height || 'auto'}-q${quality}`;
+      const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
       const cachePath = path.join(cacheDir, `${cacheKey}.jpg`);
 
       // If cache exists, return cached thumbnail directly
@@ -1141,6 +1080,219 @@ app.get('/api/thumbnail', async (req, res) => {
             fs.unlinkSync(outputPath);
           }
         });
+    } else if (mimeType === 'application/epub') {
+      // Extract cover image from EPUB file using adm-zip
+      try {
+        // Cache mechanism: generate cache path using hash
+        const cacheDir = config.thumbnailCacheDir || path.join(os.tmpdir(), 'thumbnails');
+        if (!fs.existsSync(cacheDir)) {
+          fs.mkdirSync(cacheDir, { recursive: true });
+        }
+
+        // Create cache filename using hash - include file path, modification time, and thumbnail parameters
+        const hashInput = `${fullPath}-${stats.mtimeMs}-w${width}-h${height || 'auto'}-q${quality}`;
+        const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
+        const cachePath = path.join(cacheDir, `${cacheKey}.jpg`);
+
+        // If cache exists, return cached thumbnail directly
+        if (fs.existsSync(cachePath)) {
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for one year
+          return fs.createReadStream(cachePath).pipe(res);
+        }
+
+        // Parse EPUB file as ZIP
+        const zip = new AdmZip(fullPath);
+        const entries = zip.getEntries();
+
+        // Find container.xml to get the path to content.opf
+        const containerEntry = entries.find(entry => entry.entryName === 'META-INF/container.xml');
+        if (!containerEntry) {
+          return res.status(404).json({ error: 'Invalid EPUB: container.xml not found' });
+        }
+
+        const containerXml = containerEntry.getData().toString('utf8');
+        
+        // Extract rootfile path from container.xml
+        const rootfileMatch = containerXml.match(/<rootfile[^>]*full-path="([^"]*)"[^>]*>/);
+        if (!rootfileMatch) {
+          return res.status(404).json({ error: 'Invalid EPUB: rootfile not found in container.xml' });
+        }
+
+        const contentOpfPath = rootfileMatch[1];
+        const contentOpfEntry = entries.find(entry => entry.entryName === contentOpfPath);
+        if (!contentOpfEntry) {
+          return res.status(404).json({ error: 'Invalid EPUB: content.opf not found' });
+        }
+
+        const contentOpfXml = contentOpfEntry.getData().toString('utf8');
+        
+        // Extract cover image ID from content.opf using multiple methods
+        let coverId = null;
+        
+        // Method 1: Look for cover in metadata
+        const metaMatches = contentOpfXml.match(/<meta[^>]*>/g);
+        if (metaMatches) {
+          for (const metaMatch of metaMatches) {
+            // Split by spaces to get attributes
+            const parts = metaMatch.split(/\s+/);
+            let metaName = null;
+            let metaContent = null;
+            
+            for (const part of parts) {
+              if (part.startsWith('name=')) {
+                // Extract name value
+                const nameMatch = part.match(/name="([^"]*)"/);
+                if (nameMatch) {
+                  metaName = nameMatch[1];
+                }
+              } else if (part.startsWith('content=')) {
+                // Extract content value
+                const contentMatch = part.match(/content="([^"]*)"/);
+                if (contentMatch) {
+                  metaContent = contentMatch[1];
+                }
+              }
+            }
+            
+            if (metaName === 'cover' && metaContent) {
+              coverId = metaContent;
+              break;
+            }
+          }
+        }
+        
+        // Method 2: Look for cover in manifest with properties="cover-image" or id="cover"
+        if (!coverId) {
+          // Find all item tags and parse them more carefully
+          const itemMatches = contentOpfXml.match(/<item[^>]*>/g);
+          if (itemMatches) {
+            for (const itemMatch of itemMatches) {
+              // Split by spaces to get attributes
+              const parts = itemMatch.split(/\s+/);
+
+              let itemId = null;
+              // Extract and check id value
+              for (const part of parts) {
+                if (part.startsWith('id=')) {
+                  const idMatch = part.match(/id="([^"]*)"/);
+                  if (idMatch) {
+                    itemId = idMatch[1];
+                    break;
+                  }
+                }
+              }
+
+              if (itemId === 'cover') {
+                coverId = itemId;
+                break;
+              }
+              
+              // Extract and check properties value
+              let itemProperties = null;
+              for (const part of parts) {
+                if (part.startsWith('properties=')) {
+                  const propsMatch = part.match(/properties="([^"]*)"/);
+                  if (propsMatch) {
+                    itemProperties = propsMatch[1];
+                    break;
+                  }
+                }
+              }
+
+              if (itemProperties === 'cover-image') {
+                coverId = itemId;
+                break;
+              }
+            }
+          }
+        }
+        
+        if (!coverId) {
+          return res.status(404).json({ error: 'No cover image found in EPUB' });
+        }
+
+        // Find the cover image entry in manifest using the same parsing approach
+        const coverItemMatches = contentOpfXml.match(/<item[^>]*>/g);
+        let coverHref = null;
+        
+        if (coverItemMatches) {
+          for (const itemMatch of coverItemMatches) {
+            const parts = itemMatch.split(/\s+/);
+            let itemId = null;
+            let href = null;
+            
+            for (const part of parts) {
+              if (part.startsWith('id=')) {
+                const idMatch = part.match(/id="([^"]*)"/);
+                if (idMatch) {
+                  itemId = idMatch[1];
+                }
+              } else if (part.startsWith('href=')) {
+                const hrefMatch = part.match(/href="([^"]*)"/);
+                if (hrefMatch) {
+                  href = hrefMatch[1];
+                }
+              }
+            }
+            
+            if (itemId === coverId && href) {
+              coverHref = href;
+              break;
+            }
+          }
+        }
+        
+        if (!coverHref) {
+          return res.status(404).json({ error: 'Cover image not found in EPUB manifest' });
+        }
+        
+        // Resolve relative path to absolute path within EPUB
+        const contentOpfDir = path.dirname(contentOpfPath);
+        const coverPath = path.join(contentOpfDir, coverHref).replace(/\\/g, '/');
+        
+        // Find the cover image in ZIP entries
+        const coverEntry = entries.find(entry => entry.entryName === coverPath);
+        if (!coverEntry) {
+          return res.status(404).json({ error: 'Cover image file not found in EPUB' });
+        }
+
+        // Extract cover image data
+        const coverData = coverEntry.getData();
+
+        // Process cover image with Sharp
+        const sharp = require('sharp');
+        
+        let transformer = sharp(coverData)
+          .rotate() // Auto-rotate based on EXIF data
+          .resize({
+            width: parseInt(width),
+            height: height ? parseInt(height) : null,
+            fit: 'inside',
+            withoutEnlargement: true
+          })
+          .jpeg({ quality: parseInt(quality) });
+
+        // Save to cache
+        transformer
+          .clone()
+          .toFile(cachePath)
+          .catch(err => {
+            console.error('Error caching EPUB thumbnail:', err);
+            if (fs.existsSync(cachePath)) {
+              fs.unlinkSync(cachePath);
+            }
+          });
+
+        // Send to client
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=31536000');
+        transformer.pipe(res);
+
+      } catch (error) {
+        console.error('Error extracting EPUB cover:', error);
+        res.status(500).json({ error: 'Failed to extract EPUB cover' });
+      }
     } else {
       res.status(400).json({ error: 'File is not supported' });
     }

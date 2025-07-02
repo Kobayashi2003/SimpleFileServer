@@ -3,7 +3,7 @@
 import "./scrollbar.css";
 import { cn, getPreviewType } from "@/lib/utils";
 import axios from "axios";
-import React, { Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FixedSizeList as List, FixedSizeGrid as Grid } from 'react-window';
@@ -13,27 +13,25 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   List as ListIcon, Grid3x3 as Grid3x3Icon, Image as ImageIcon, Search, ArrowLeft, ArrowUp,
-  Download, Upload, Edit, Trash2, ClipboardCopy, ClipboardPaste, MoveHorizontal, Layout,
-  Info, Database, Eye, MoreHorizontal, TestTube2, LogIn, LogOut, User, Scissors, Check,
-  CircleCheck, CircleX, ArrowLeftRight, RefreshCcw, FolderUp, FolderPlus, CheckCheck,
-  Loader2, Square, Home, X, Menu, MousePointer2
+  Download, Upload, Trash2, ClipboardCopy, ClipboardPaste, MoveHorizontal, Database, Eye, 
+  MoreHorizontal, TestTube2, LogIn, LogOut, User, Scissors, CircleCheck, CircleX, ArrowLeftRight, 
+  RefreshCcw, FolderUp, FolderPlus, CheckCheck, Loader2, Square, Home, X, Menu, MousePointer2
 } from "lucide-react";
 
 import { BreadcrumbNav } from "@/components/nav";
 import { FloatingButtons, FloatingButton } from "@/components/button";
 import { Error, Loading, NotFound } from "@/components/status";
-import { FileItemListView, FileItemGridView, ImageItem, VideoItem } from "@/components/fileItem";
 import { ImagePreview, VideoPreview, AudioPreview, TextPreview, ComicPreview, EPUBPreview, PDFPreview } from "@/components/preview";
 import {
   ConfirmDialog, DetailsDialog, DownloadDialog, UploadDialog,
   IndexSettingsDialog, WatcherSettingsDialog, LoginDialog, InputDialog
 } from "@/components/dialog";
 import { DirectionMenu } from "@/components/menu";
+import { ListView, GridView, ImageGridView, MasonryView } from "@/components/view";
 
 import { useAuth } from '@/context/auth-context';
 
@@ -54,447 +52,6 @@ interface PreviewState {
   content?: string;
   currentIndex?: number;
 }
-
-
-
-interface FileRowProps {
-  index: number;
-  style: React.CSSProperties;
-  data: {
-    files: FileData[];
-    selectedFiles: string[];
-    isSelecting: boolean;
-    isSearching: boolean;
-    onFileClick: (path: string, mimeType: string, isDirectory: boolean) => void;
-    onCopy: (path: string) => void;
-    onCut: (path: string) => void;
-    onDownload: (path: string) => void;
-    onDelete: (path: string) => void;
-    onShowDetails: (file: FileData) => void;
-    onQuickSelect: (path: string) => void;
-    onRename: (path: string) => void;
-    focusedIndex: number | null;
-  };
-}
-
-const FileRow = React.memo(({ index, style, data }: FileRowProps) => {
-  const { files, selectedFiles, isSelecting, isSearching, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
-  const file = files[index];
-  const isFocused = focusedIndex === index;
-
-  return (
-    <div style={style}>
-      <ContextMenu>
-        <ContextMenuTrigger>
-          <FileItemListView
-            {...file}
-            isSearching={isSearching}
-            onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
-            className={cn(
-              "text-white hover:text-black hover:bg-accent",
-              isSelecting && selectedFiles.includes(file.path) && "border-2 border-blue-500 bg-blue-500/10 hover:text-white hover:bg-blue-500/20",
-              isFocused && "border-l-4 border-yellow-500"
-            )}
-          />
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onClick={() => onShowDetails(file)}>
-            <Info className="mr-2" size={16} />
-            Details
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onQuickSelect(file.path)}>
-            <Check className="mr-2" size={16} />
-            Select
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onRename(file.path)}>
-            <Edit className="mr-2" size={16} />
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onCopy(file.path)}>
-            <ClipboardCopy className="mr-2" size={16} />
-            Copy
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onCut(file.path)}>
-            <Scissors className="mr-2" size={16} />
-            Cut
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onDownload(file.path)}>
-            <Download className="mr-2" size={16} />
-            Download
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onDelete(file.path)}>
-            <Trash2 className="mr-2" size={16} />
-            Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-    </div>
-  );
-});
-
-interface FileCellProps {
-  columnIndex: number;
-  rowIndex: number;
-  style: React.CSSProperties;
-  data: {
-    files: FileData[];
-    selectedFiles: string[];
-    isSelecting: boolean;
-    columnCount: number;
-    onFileClick: (path: string, mimeType: string, isDirectory: boolean) => void;
-    onCopy: (path: string) => void;
-    onCut: (path: string) => void;
-    onDownload: (path: string) => void;
-    onDelete: (path: string) => void;
-    onShowDetails: (file: FileData) => void;
-    onQuickSelect: (path: string) => void;
-    onRename: (path: string) => void;
-    focusedIndex: number | null;
-  };
-}
-
-const FileCell = React.memo(({ columnIndex, rowIndex, style, data }: FileCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
-  const index = rowIndex * columnCount + columnIndex;
-  if (index >= files.length) return null;
-
-  const file = files[index];
-  const isFocused = focusedIndex === index;
-
-  return (
-    <div style={style} className="p-1">
-      <ContextMenu>
-        <ContextMenuTrigger>
-          <FileItemGridView
-            {...file}
-            cover=""
-            onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
-            className={cn(
-              "text-black hover:text-gray-600 hover:bg-accent",
-              isSelecting && selectedFiles.includes(file.path) && "border-2 border-blue-500 bg-blue-500/10 hover:text-black hover:bg-blue-500/20",
-              isFocused && "border-2 border-yellow-500"
-            )}
-          />
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onClick={() => onShowDetails(file)}>
-            <Info className="mr-2" size={16} />
-            Details
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onQuickSelect(file.path)}>
-            <Check className="mr-2" size={16} />
-            Select
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onRename(file.path)}>
-            <Edit className="mr-2" size={16} />
-            Rename
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onCopy(file.path)}>
-            <ClipboardCopy className="mr-2" size={16} />
-            Copy
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onCut(file.path)}>
-            <Scissors className="mr-2" size={16} />
-            Cut
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onDownload(file.path)}>
-            <Download className="mr-2" size={16} />
-            Download
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => onDelete(file.path)}>
-            <Trash2 className="mr-2" size={16} />
-            Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-    </div>
-  )
-});
-
-interface ImageCellProps {
-  columnIndex: number;
-  rowIndex: number;
-  style: React.CSSProperties;
-  data: {
-    columnCount: number;
-    token?: string;
-    files: FileData[];
-    selectedFiles: string[];
-    isSelecting: boolean;
-    useImageQuickPreview: boolean;
-    onFileClick: (path: string, mimeType: string, isDirectory: boolean) => void;
-    onCopy: (path: string) => void;
-    onCut: (path: string) => void;
-    onDownload: (path: string) => void;
-    onDelete: (path: string) => void;
-    onShowDetails: (file: FileData) => void;
-    onQuickSelect: (path: string) => void;
-    onRename: (path: string) => void;
-    focusedIndex: number | null;
-  };
-}
-
-const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, token, focusedIndex } = data;
-  const index = rowIndex * columnCount + columnIndex;
-  if (index >= files.length) return null;
-
-  const file = files[index];
-
-  if (file.mimeType?.startsWith('image/')) {
-    return (
-      <div style={style} className="p-1">
-        <ContextMenu>
-          <ContextMenuTrigger>
-            <ImageItem
-              src={`/api/raw?path=${encodeURIComponent(file.path)}${token ? `&token=${token}` : ''}`}
-              thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
-              alt={file.name}
-              onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
-              className={cn(
-                "w-full h-full object-cover rounded-md cursor-pointer",
-                isSelecting && selectedFiles.includes(file.path) && "border-2 border-blue-500 bg-blue-500/10 hover:text-black hover:bg-blue-500/20",
-                focusedIndex === index && "border-2 border-yellow-500"
-              )}
-              loading="eager"
-              disablePreview={!useImageQuickPreview || isSelecting}
-            />
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={() => onShowDetails(file)}>
-              <Info className="mr-2" size={16} />
-              Details
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onQuickSelect(file.path)}>
-              <Check className="mr-2" size={16} />
-              Select
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onRename(file.path)}>
-              <Edit className="mr-2" size={16} />
-              Rename
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCopy(file.path)}>
-              <ClipboardCopy className="mr-2" size={16} />
-              Copy
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCut(file.path)}>
-              <Scissors className="mr-2" size={16} />
-              Cut
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onDownload(file.path)}>
-              <Download className="mr-2" size={16} />
-              Download
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onDelete(file.path)}>
-              <Trash2 className="mr-2" size={16} />
-              Delete
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      </div>
-    );
-  } else if (file.mimeType?.startsWith('video/')) {
-    return (
-      <div style={style} className="p-1">
-        <ContextMenu>
-          <ContextMenuTrigger>
-            <VideoItem
-              alt={file.name}
-              thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
-              onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
-              className={cn(
-                "w-full h-full object-cover rounded-md cursor-pointer",
-                isSelecting && selectedFiles.includes(file.path) && "border-2 border-blue-500 bg-blue-500/10 hover:text-black hover:bg-blue-500/20",
-                focusedIndex === index && "border-2 border-yellow-500"
-              )}
-              loading="eager"
-            />
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={() => onShowDetails(file)}>
-              <Info className="mr-2" size={16} />
-              Details
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onQuickSelect(file.path)}>
-              <Check className="mr-2" size={16} />
-              Select
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onRename(file.path)}>
-              <Edit className="mr-2" size={16} />
-              Rename
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCopy(file.path)}>
-              <ClipboardCopy className="mr-2" size={16} />
-              Copy
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCut(file.path)}>
-              <Scissors className="mr-2" size={16} />
-              Cut
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onDownload(file.path)}>
-              <Download className="mr-2" size={16} />
-              Download
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onDelete(file.path)}>
-              <Trash2 className="mr-2" size={16} />
-              Delete
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      </div>
-    )
-  } else {
-    return (
-      <div style={style} className="p-1">
-        <ContextMenu>
-          <ContextMenuTrigger>
-            <FileItemGridView
-              {...file}
-              cover={file.cover ? `/api/thumbnail?path=${encodeURIComponent(file.cover)}&width=300&quality=80${token ? `&token=${token}` : ''}` : undefined}
-              onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
-              className={cn(
-                "text-black hover:text-gray-600 hover:bg-accent",
-                isSelecting && selectedFiles.includes(file.path) && "border-2 border-blue-500 bg-blue-500/10 hover:text-black hover:bg-blue-500/20",
-                focusedIndex === index && "border-2 border-yellow-500"
-              )}
-            />
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={() => onShowDetails(file)}>
-              <Info className="mr-2" size={16} />
-              Details
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onQuickSelect(file.path)}>
-              <Check className="mr-2" size={16} />
-              Select
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onRename(file.path)}>
-              <Edit className="mr-2" size={16} />
-              Rename
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCopy(file.path)}>
-              <ClipboardCopy className="mr-2" size={16} />
-              Copy
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onCut(file.path)}>
-              <Scissors className="mr-2" size={16} />
-              Cut
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onDownload(file.path)}>
-              <Download className="mr-2" size={16} />
-              Download
-            </ContextMenuItem>
-            <ContextMenuItem onClick={() => onDelete(file.path)}>
-              <Trash2 className="mr-2" size={16} />
-              Delete
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      </div>
-    );
-  }
-});
-
-interface MasonryCellProps {
-  index: number;
-  style: React.CSSProperties;
-  data: {
-    columnCount: number;
-    columnWidth: number;
-    token?: string;
-    files: FileData[];
-    selectedFiles: string[];
-    isSelecting: boolean;
-    useImageQuickPreview: boolean;
-    direction: 'ltr' | 'rtl';
-    onFileClick: (path: string, mimeType: string, isDirectory: boolean) => void;
-    onCopy: (path: string) => void;
-    onCut: (path: string) => void;
-    onDownload: (path: string) => void;
-    onDelete: (path: string) => void;
-    onShowDetails: (file: FileData) => void;
-    onQuickSelect: (path: string) => void;
-    onRename: (path: string) => void;
-    focusedIndex: number | null;
-  };
-}
-
-const MasonryCell = React.memo(({ index, style, data }: MasonryCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, columnWidth, direction, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, token, focusedIndex } = data;
-  // Each index represents a column of images
-  if (index >= columnCount) return null;
-
-  // Get files for this column using distribution algorithm
-  const columnFiles = files.filter((_, fileIndex) => fileIndex % columnCount === index);
-
-  return (
-    <div
-      style={{
-        ...style,
-        width: columnWidth,
-        position: 'absolute',
-        left: index * columnWidth,
-        top: 0,
-        height: 'auto',
-        direction
-      }}
-      className="flex flex-col gap-2 px-1"
-    >
-      {columnFiles.map((file) => (
-        <div key={file.path} className="break-inside-avoid mb-2 w-full">
-          <ContextMenu>
-            <ContextMenuTrigger>
-              <ImageItem
-                {...file}
-                src={`/api/raw?path=${encodeURIComponent(file.path)}${token ? `&token=${token}` : ''}`}
-                thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
-                alt={file.name}
-                onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
-                className={cn(
-                  "w-full h-auto rounded-md",
-                  isSelecting && selectedFiles.includes(file.path) && "border-2 border-blue-500 bg-blue-500/10 hover:text-black hover:bg-blue-500/20",
-                  focusedIndex === files.indexOf(file) && "border-2 border-yellow-500"
-                )}
-                loading="lazy"
-                disablePreview={!useImageQuickPreview}
-              />
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem onClick={() => onShowDetails(file)}>
-                <Info className="mr-2" size={16} />
-                Details
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onQuickSelect(file.path)}>
-                <Check className="mr-2" size={16} />
-                Select
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onRename(file.path)}>
-                <Edit className="mr-2" size={16} />
-                Rename
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onCopy(file.path)}>
-                <ClipboardCopy className="mr-2" size={16} />
-                Copy
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onCut(file.path)}>
-                <Scissors className="mr-2" size={16} />
-                Cut
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onDownload(file.path)}>
-                <Download className="mr-2" size={16} />
-                Download
-              </ContextMenuItem>
-              <ContextMenuItem onClick={() => onDelete(file.path)}>
-                <Trash2 className="mr-2" size={16} />
-                Delete
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-        </div>
-      ))}
-    </div>
-  );
-});
 
 
 
@@ -2122,182 +1679,6 @@ function FileExplorerContent() {
   ]);
 
 
-  const renderList = useCallback(({ height, width }: { height: number; width: number }) => (
-    <List
-      ref={listRef}
-      height={height}
-      width={width}
-      itemCount={accumulatedFiles.length}
-      itemSize={48}
-      overscanCount={20}
-      itemData={{
-        files: accumulatedFiles,
-        selectedFiles,
-        isSelecting,
-        isSearching,
-        onFileClick: handleFileClick,
-        onCopy: handleCopy,
-        onCut: handleMoveFrom,
-        onDownload: handleDownload,
-        onDelete: handleDelete,
-        onShowDetails: handleShowDetails,
-        onQuickSelect: handleQuickSelect,
-        onRename: handleRename,
-        focusedIndex: focusedFileIndex
-      }}
-      className="custom-scrollbar"
-      onScroll={handleVirtualizedScroll}
-      onItemsRendered={({ visibleStartIndex, visibleStopIndex }) => {
-        const itemCount = accumulatedFiles.length;
-        if (!isLoadingMore && hasMoreFiles && visibleStopIndex >= itemCount - SCROLL_BUFFER) {
-          loadNextPage();
-        }
-      }}
-    >
-      {FileRow}
-    </List>
-  ),
-    [accumulatedFiles, selectedFiles, isSelecting, isSearching, handleFileClick, handleDownload, handleDelete, handleShowDetails, handleQuickSelect, handleRename, handleItemsRendered, focusedFileIndex]);
-
-  const renderGrid = useCallback(({ height, width }: { height: number; width: number }) => {
-    const columnCount = getColumnCount(width);
-    const rowCount = Math.ceil(accumulatedFiles.length / columnCount);
-    const cellWidth = width / columnCount;
-    const cellHeight = cellWidth;
-
-    return (
-      <Grid
-        ref={gridRef}
-        height={height}
-        width={width + 10}
-        columnCount={columnCount}
-        rowCount={rowCount}
-        columnWidth={cellWidth}
-        rowHeight={cellHeight}
-        overscanRowCount={10}
-        overscanColumnCount={5}
-        itemData={{
-          files: accumulatedFiles,
-          selectedFiles,
-          isSelecting,
-          columnCount,
-          onFileClick: handleFileClick,
-          onCopy: handleCopy,
-          onCut: handleMoveFrom,
-          onDownload: handleDownload,
-          onDelete: handleDelete,
-          onShowDetails: handleShowDetails,
-          onQuickSelect: handleQuickSelect,
-          onRename: handleRename,
-          focusedIndex: focusedFileIndex
-        }}
-        className="custom-scrollbar"
-        onScroll={handleVirtualizedScroll}
-        onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex }) => {
-          // Convert row indices to item indices for grid layout
-          const visibleStartIndex = visibleRowStartIndex * columnCount;
-          const visibleStopIndex = (visibleRowStopIndex + 1) * columnCount - 1;
-          handleItemsRendered({ visibleStartIndex, visibleStopIndex });
-        }}
-      >
-        {FileCell}
-      </Grid>
-    );
-  }, [accumulatedFiles, selectedFiles, isSelecting, handleFileClick, handleDownload, handleDelete, handleShowDetails, handleQuickSelect, handleRename, handleItemsRendered, focusedFileIndex]);
-
-  const renderImageGrid = useCallback(({ height, width }: { height: number; width: number }) => {
-    const columnCount = getColumnCount(width);
-    const rowCount = Math.ceil(accumulatedFiles.length / columnCount);
-    const cellWidth = width / columnCount;
-    const cellHeight = cellWidth;
-
-    return (
-      <Grid
-        ref={imageGridRef}
-        height={height}
-        width={width + 10}
-        columnCount={columnCount}
-        rowCount={rowCount}
-        columnWidth={cellWidth}
-        rowHeight={cellHeight}
-        overscanRowCount={10}
-        overscanColumnCount={5}
-        itemData={{
-          columnCount,
-          token: token || undefined,
-          files: accumulatedFiles,
-          selectedFiles,
-          isSelecting,
-          useImageQuickPreview,
-          onFileClick: handleFileClick,
-          onCopy: handleCopy,
-          onCut: handleMoveFrom,
-          onDownload: handleDownload,
-          onDelete: handleDelete,
-          onShowDetails: handleShowDetails,
-          onQuickSelect: handleQuickSelect,
-          onRename: handleRename,
-          focusedIndex: focusedFileIndex
-        }}
-        className="custom-scrollbar"
-        onScroll={handleVirtualizedScroll}
-        onItemsRendered={({ visibleRowStartIndex, visibleRowStopIndex }) => {
-          // Convert row indices to item indices for grid layout
-          const visibleStartIndex = visibleRowStartIndex * columnCount;
-          const visibleStopIndex = (visibleRowStopIndex + 1) * columnCount - 1;
-          handleItemsRendered({ visibleStartIndex, visibleStopIndex });
-        }}
-      >
-        {ImageCell}
-      </Grid>
-    );
-  }, [token, accumulatedFiles, selectedFiles, isSelecting, useImageQuickPreview, handleFileClick, handleDownload, handleDelete, handleShowDetails, handleQuickSelect, handleRename, handleItemsRendered, focusedFileIndex]);
-
-  const renderMasonry = useCallback(({ height, width }: { height: number; width: number }) => {
-    const columnCount = getColumnCount(width);
-    const columnWidth = width / columnCount;
-
-    // Array of column indices
-    const columns = Array.from({ length: columnCount }, (_, i) => i);
-
-    return (
-      <div
-        ref={masonryRef}
-        style={{ height, width: width + 10, position: 'relative', overflowY: 'auto' }}
-        className="custom-scrollbar"
-      >
-        {columns.map(index => (
-          <MasonryCell
-            key={index}
-            index={index}
-            style={{}}
-            data={{
-              columnCount,
-              columnWidth,
-              token: token || undefined,
-              files: accumulatedFiles,
-              selectedFiles,
-              isSelecting,
-              useImageQuickPreview,
-              direction: gridDirection,
-              onFileClick: handleFileClick,
-              onCopy: handleCopy,
-              onCut: handleMoveFrom,
-              onDownload: handleDownload,
-              onDelete: handleDelete,
-              onShowDetails: handleShowDetails,
-              onQuickSelect: handleQuickSelect,
-              onRename: handleRename,
-              focusedIndex: focusedFileIndex
-            }}
-          />
-        ))}
-      </div>
-    );
-  }, [token, useMasonry, gridDirection, accumulatedFiles, selectedFiles, isSelecting, useImageQuickPreview, handleFileClick, handleDownload, handleDelete, handleShowDetails, handleQuickSelect, handleRename, focusedFileIndex]);
-
-
-
   const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     console.log('handleDragEnter');
     e.preventDefault();
@@ -3079,23 +2460,107 @@ function FileExplorerContent() {
           )}>
             {viewMode === 'list' && (
               <AutoSizer>
-                {renderList}
+                {({ height, width }) => (
+                  <ListView
+                    height={height}
+                    width={width}
+                    files={accumulatedFiles}
+                    selectedFiles={selectedFiles}
+                    isSelecting={isSelecting}
+                    isSearching={isSearching}
+                    focusedIndex={focusedFileIndex}
+                    onFileClick={handleFileClick}
+                    onCopy={handleCopy}
+                    onCut={handleMoveFrom}
+                    onDownload={handleDownload}
+                    onDelete={handleDelete}
+                    onShowDetails={handleShowDetails}
+                    onQuickSelect={handleQuickSelect}
+                    onRename={handleRename}
+                    onScroll={handleVirtualizedScroll}
+                    onItemsRendered={handleItemsRendered}
+                    listRef={listRef}
+                  />
+                )}
               </AutoSizer>
             )}
             {viewMode === 'grid' && (
               <AutoSizer>
-                {renderGrid}
+                {({ height, width }) => (
+                  <GridView
+                    height={height}
+                    width={width}
+                    files={accumulatedFiles}
+                    selectedFiles={selectedFiles}
+                    isSelecting={isSelecting}
+                    focusedIndex={focusedFileIndex}
+                    onFileClick={handleFileClick}
+                    onCopy={handleCopy}
+                    onCut={handleMoveFrom}
+                    onDownload={handleDownload}
+                    onDelete={handleDelete}
+                    onShowDetails={handleShowDetails}
+                    onQuickSelect={handleQuickSelect}
+                    onRename={handleRename}
+                    onScroll={handleVirtualizedScroll}
+                    onItemsRendered={handleItemsRendered}
+                    gridRef={gridRef}
+                  />
+                )}
               </AutoSizer>
             )}
             {viewMode === 'image' && (
               <>
                 {isImageOnlyMode && useMasonry ? (
                   <AutoSizer>
-                    {renderMasonry}
+                    {({ height, width }) => (
+                      <MasonryView
+                        height={height}
+                        width={width}
+                        files={accumulatedFiles}
+                        selectedFiles={selectedFiles}
+                        isSelecting={isSelecting}
+                        focusedIndex={focusedFileIndex}
+                        useImageQuickPreview={useImageQuickPreview}
+                        direction={gridDirection}
+                        token={token}
+                        onFileClick={handleFileClick}
+                        onCopy={handleCopy}
+                        onCut={handleMoveFrom}
+                        onDownload={handleDownload}
+                        onDelete={handleDelete}
+                        onShowDetails={handleShowDetails}
+                        onQuickSelect={handleQuickSelect}
+                        onRename={handleRename}
+                        masonryRef={masonryRef}
+                      />
+                    )}
                   </AutoSizer>
                 ) : (
                   <AutoSizer>
-                    {renderImageGrid}
+                    {({ height, width }) => (
+                      <ImageGridView
+                        height={height}
+                        width={width}
+                        files={accumulatedFiles}
+                        selectedFiles={selectedFiles}
+                        isSelecting={isSelecting}
+                        focusedIndex={focusedFileIndex}
+                        useImageQuickPreview={useImageQuickPreview}
+                        token={token}
+                        onFileClick={handleFileClick}
+                        onCopy={handleCopy}
+                        onCut={handleMoveFrom}
+                        onDownload={handleDownload}
+                        onDelete={handleDelete}
+                        onShowDetails={handleShowDetails}
+                        onQuickSelect={handleQuickSelect}
+                        onRename={handleRename}
+                        onScroll={handleVirtualizedScroll}
+                        onItemsRendered={handleItemsRendered}
+                        imageGridRef={imageGridRef}
+                      />
+                    )}
                   </AutoSizer>
                 )}
               </>

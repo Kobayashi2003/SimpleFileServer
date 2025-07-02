@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils";
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
   SkipBack, SkipForward, Settings, X, Download,
@@ -116,6 +116,18 @@ export const Video = ({
   // Keyboard shortcuts state and refs
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const keyboardShortcutsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Long press and click detection state and refs
+  const [isLongPressing, setIsLongPressing] = useState(false);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const clickStartTimeRef = useRef<number | null>(null);
+  const isSimpleClickRef = useRef(false);
+  const LONG_PRESS_DURATION = 500; // ms
+
+  // Double click detection
+  const singleClickDelayRef = useRef<NodeJS.Timeout | null>(null);
+  const isDoubleClickProcessingRef = useRef(false);
+  const SINGLE_CLICK_DELAY = 250; // ms
 
   // Format time in MM:SS format
   const formatTime = (seconds: number) => {
@@ -415,6 +427,15 @@ export const Video = ({
     const containerRect = controlLayerRef.current?.getBoundingClientRect();
 
     if (containerRect) {
+      // Mark that we're processing a double click
+      isDoubleClickProcessingRef.current = true;
+      
+      // Cancel any pending single click
+      if (singleClickDelayRef.current) {
+        clearTimeout(singleClickDelayRef.current);
+        singleClickDelayRef.current = null;
+      }
+
       // Check if click is in the controls area (bottom 20% of the container)
       const clickY = e.clientY;
       const containerHeight = containerRect.height;
@@ -448,20 +469,19 @@ export const Video = ({
 
 
   // Auto-hide controls after inactivity
-  const resetControlsTimeout = () => {
+  const resetControlsTimeout = useCallback(() => {
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
 
-    // setShowControls(!showControls);
     setShowControls(true);
 
-    if (isPlaying && !isUpdatingProgress && !isMouseOverControls) {
+    if (isPlaying && !isUpdatingProgress && !(containerWidth > 768 && isMouseOverControls)) {
       controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
       }, 3000);
     }
-  };
+  }, [isPlaying, isUpdatingProgress, isMouseOverControls, containerWidth]);
 
   // Track dragging state to prevent controls from hiding
   useEffect(() => {
@@ -473,7 +493,7 @@ export const Video = ({
     } else {
       resetControlsTimeout();
     }
-  }, [isUpdatingProgress, isPlaying, isMouseOverControls]);
+  }, [isUpdatingProgress, resetControlsTimeout]);
 
   // Event listeners
   useEffect(() => {
@@ -691,6 +711,12 @@ export const Video = ({
       if (keyboardShortcutsTimeoutRef.current) {
         clearTimeout(keyboardShortcutsTimeoutRef.current);
       }
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+      if (singleClickDelayRef.current) {
+        clearTimeout(singleClickDelayRef.current);
+      }
     };
   }, []);
 
@@ -714,6 +740,94 @@ export const Video = ({
     cumulativeSkipRef.current = null;
   };
 
+  // Check if a point is outside the controls area
+  const isOutsideControlsArea = (clientX: number, clientY: number) => {
+    if (!controlLayerRef.current || !controlsContainerRef.current) return false;
+    
+    const containerRect = controlLayerRef.current.getBoundingClientRect();
+    const controlsRect = controlsContainerRef.current.getBoundingClientRect();
+    
+    // Check if the click is above the controls area
+    return clientY < controlsRect.top;
+  };
+
+  // Get the side (left/right) of the click relative to the container
+  const getClickSide = (clientX: number) => {
+    if (!controlLayerRef.current) return 'center';
+    
+    const containerRect = controlLayerRef.current.getBoundingClientRect();
+    const position = (clientX - containerRect.left) / containerRect.width;
+    
+    if (position < 0.5) return 'left';
+    return 'right';
+  };
+
+  // Handle simple click outside controls area
+  const handleClickOutsideControls = (clientX: number, clientY: number) => {
+    if (!isOutsideControlsArea(clientX, clientY)) return;
+    
+    const side = getClickSide(clientX);
+    console.log(`Simple click outside controls - Side: ${side}`);
+    
+    // TODO: Implement click outside controls logic
+    // Example: Toggle play/pause for center area clicks
+  };
+
+  // Handle simple click outside controls area with delay
+  const handleClickOutsideControlsDelayed = (clientX: number, clientY: number) => {
+    if (singleClickDelayRef.current) {
+      clearTimeout(singleClickDelayRef.current);
+    }
+    
+    singleClickDelayRef.current = setTimeout(() => {
+      if (!isDoubleClickProcessingRef.current) {
+        handleClickOutsideControls(clientX, clientY);
+      }
+      isDoubleClickProcessingRef.current = false;
+    }, SINGLE_CLICK_DELAY);
+  };
+
+  // Handle long press outside controls area
+  const handleLongPressOutsideControls = (clientX: number, clientY: number) => {
+    if (!isOutsideControlsArea(clientX, clientY)) return;
+    
+    const side = getClickSide(clientX);
+    console.log(`Long press outside controls - Side: ${side}`);
+    
+    // TODO: Implement long press logic based on side
+    switch (side) {
+      case 'left':
+        console.log('Long press on left side outside controls');
+        // TODO: Implement left side long press functionality
+        break;
+      case 'right':
+        console.log('Long press on right side outside controls');
+        // TODO: Implement right side long press functionality
+        break;
+    }
+  };
+
+  // Start long press timer
+  const startLongPressTimer = (clientX: number, clientY: number) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    
+    longPressTimerRef.current = setTimeout(() => {
+      setIsLongPressing(true);
+      handleLongPressOutsideControls(clientX, clientY);
+    }, LONG_PRESS_DURATION);
+  };
+
+  // Cancel long press timer
+  const cancelLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    setIsLongPressing(false);
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     console.log('handleMouseDown');
     e.preventDefault();
@@ -722,6 +836,16 @@ export const Video = ({
     startMousePosRef.current = { x: e.clientX, y: e.clientY };
     lastMousePosRef.current = { x: e.clientX, y: e.clientY };
     mouseGestureTypeRef.current = null;
+    
+    // Track click start time for simple click detection
+    clickStartTimeRef.current = Date.now();
+    isSimpleClickRef.current = true;
+    
+    // Start long press timer if outside controls area
+    if (isOutsideControlsArea(e.clientX, e.clientY)) {
+      startLongPressTimer(e.clientX, e.clientY);
+    }
+    
     resetControlsTimeout();
   };
 
@@ -730,14 +854,20 @@ export const Video = ({
     e.preventDefault();
     e.stopPropagation();
     resetControlsTimeout();
+    
     if (isMouseDraggingRef.current && startMousePosRef.current && lastMousePosRef.current) {
       const deltaXFromStart = e.clientX - startMousePosRef.current.x;
       const deltaYFromStart = e.clientY - startMousePosRef.current.y;
       const deltaX = e.clientX - lastMousePosRef.current.x;
       const deltaY = e.clientY - lastMousePosRef.current.y;
       lastMousePosRef.current = { x: e.clientX, y: e.clientY };
-      // console.log({ deltaXFromStart, deltaYFromStart, deltaX, deltaY });
-
+      
+      // If movement detected, cancel simple click and long press
+      if (Math.abs(deltaXFromStart) > 5 || Math.abs(deltaYFromStart) > 5) {
+        isSimpleClickRef.current = false;
+        cancelLongPressTimer();
+      }
+      
       if (mouseGestureTypeRef.current === null) {
         if (Math.abs(deltaXFromStart) > Math.abs(deltaYFromStart) * 2 && Math.abs(deltaXFromStart) > 10) {
           mouseGestureTypeRef.current = 'seek';
@@ -775,6 +905,23 @@ export const Video = ({
     console.log('handleMouseUp');
     e?.preventDefault();
     e?.stopPropagation();
+    
+    // Handle simple click detection
+    if (isSimpleClickRef.current && clickStartTimeRef.current && e) {
+      const clickDuration = Date.now() - clickStartTimeRef.current;
+      // Only consider it a simple click if it was quick and no long press occurred
+      if (clickDuration < LONG_PRESS_DURATION && !isLongPressing) {
+        handleClickOutsideControlsDelayed(e.clientX, e.clientY);
+      }
+    }
+    
+    // Cancel long press timer
+    cancelLongPressTimer();
+    
+    // Reset click tracking
+    clickStartTimeRef.current = null;
+    isSimpleClickRef.current = false;
+    
     if (isMouseDraggingRef.current) {
       if (mouseGestureTypeRef.current === 'seek') {
         applyPendingTime();
@@ -800,6 +947,16 @@ export const Video = ({
     touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     touchGestureTypeRef.current = null;
+    
+    // Track touch start time for simple touch detection
+    clickStartTimeRef.current = Date.now();
+    isSimpleClickRef.current = true;
+    
+    // Start long press timer if outside controls area
+    if (isOutsideControlsArea(e.touches[0].clientX, e.touches[0].clientY)) {
+      startLongPressTimer(e.touches[0].clientX, e.touches[0].clientY);
+    }
+    
     resetControlsTimeout();
   };
 
@@ -808,6 +965,7 @@ export const Video = ({
     // e.preventDefault();
     e.stopPropagation();
     resetControlsTimeout();
+    
     if (e.touches.length === 1 && touchStartRef.current && lastTouchRef.current) {
       const touch = e.touches[0];
       const deltaXFromStart = touch.clientX - touchStartRef.current.x;
@@ -815,8 +973,13 @@ export const Video = ({
       const deltaX = touch.clientX - lastTouchRef.current.x;
       const deltaY = touch.clientY - lastTouchRef.current.y;
       lastTouchRef.current = { x: touch.clientX, y: touch.clientY };
-      // console.log({ deltaXFromStart, deltaYFromStart, deltaX, deltaY });
-
+      
+      // If movement detected, cancel simple touch and long press
+      if (Math.abs(deltaXFromStart) > 5 || Math.abs(deltaYFromStart) > 5) {
+        isSimpleClickRef.current = false;
+        cancelLongPressTimer();
+      }
+      
       if (touchGestureTypeRef.current === null) {
         if (Math.abs(deltaXFromStart) > Math.abs(deltaYFromStart) * 2 && Math.abs(deltaXFromStart) > 10) {
           touchGestureTypeRef.current = 'seek';
@@ -853,6 +1016,23 @@ export const Video = ({
     // console.log('handleTouchEnd');
     // e?.preventDefault();
     e?.stopPropagation();
+    
+    // Handle simple touch detection
+    if (isSimpleClickRef.current && clickStartTimeRef.current && touchStartRef.current) {
+      const touchDuration = Date.now() - clickStartTimeRef.current;
+      // Only consider it a simple touch if it was quick and no long press occurred
+      if (touchDuration < LONG_PRESS_DURATION && !isLongPressing) {
+        handleClickOutsideControlsDelayed(touchStartRef.current.x, touchStartRef.current.y);
+      }
+    }
+    
+    // Cancel long press timer
+    cancelLongPressTimer();
+    
+    // Reset touch tracking
+    clickStartTimeRef.current = null;
+    isSimpleClickRef.current = false;
+    
     if (isTouchingRef.current) {
       if (touchGestureTypeRef.current === 'seek') {
         applyPendingTime();
