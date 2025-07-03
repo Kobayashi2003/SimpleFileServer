@@ -922,6 +922,10 @@ app.get('/api/thumbnail', async (req, res) => {
         res.setHeader('Content-Type', 'image/bmp');
         return fs.createReadStream(fullPath).pipe(res);
       }
+      if (mimeType === 'image/gif' && !config.generateThumbnailForGif) {
+        res.setHeader('Content-Type', 'image/gif');
+        return fs.createReadStream(fullPath).pipe(res);
+      }
       if (mimeType === 'image/x-icon') {
         // Cause sharp cannot handle ico files, I return the original file directly
         res.setHeader('Content-Type', 'image/x-icon');

@@ -32,6 +32,7 @@ const config = {
 
   generateThumbnail: process.env.GENERATE_THUMBNAIL === 'true' || false,
   thumbnailCacheDir: process.env.THUMBNAIL_CACHE_DIR || path.join(TMP_DIR, 'thumbnails'),
+  generateThumbnailForGif: process.env.GENERATE_THUMBNAIL_FOR_GIF === 'true' || false,
   
   // PSD processing options
   // NOTE: This may cause a large storage usage, please be careful.
