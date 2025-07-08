@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useRef } from "react";
-import { cn } from "@/lib/utils";
 import PreviewBase, { PreviewBaseProps } from "./PreviewBase";
+import { Audio } from "@/components/audio/Audio";
 
 interface AudioPreviewProps extends Omit<PreviewBaseProps, 'children' | 'isLoading' | 'hasError'> {
   /** Audio source URL */
@@ -14,7 +14,6 @@ export const AudioPreview: React.FC<AudioPreviewProps> = ({
   controls,
   ...restProps
 }) => {
-
   const currentSrcRef = useRef(src);
   const cachedAudioRef = useRef<Set<string>>(new Set());
 
@@ -33,58 +32,10 @@ export const AudioPreview: React.FC<AudioPreviewProps> = ({
       setIsLoading(false);
       setHasError(true);
     }
-  }, []);
+  }, [src]);
 
   useEffect(() => {
     currentSrcRef.current = src;
-
-    const checkIfCached = () => {
-      if (cachedAudioRef.current.has(src)) {
-        if (src === currentSrcRef.current) {
-          setIsLoading(false);
-        }
-        return;
-      }
-
-      const audio = new Audio();
-
-      audio.onloadedmetadata = () => {
-        cachedAudioRef.current.add(src);
-        if (src === currentSrcRef.current) {
-          setIsLoading(false);
-        }
-      };
-
-      audio.oncanplaythrough = () => {
-        cachedAudioRef.current.add(src);
-        if (src === currentSrcRef.current) {
-          setIsLoading(false);
-        }
-      };
-
-      audio.onerror = () => {
-        if (src === currentSrcRef.current) {
-          setIsLoading(false);
-          setHasError(true);
-        }
-      };
-
-      audio.src = src;
-      audio.preload = "metadata";
-
-      if (audio.readyState >= 2) {
-        cachedAudioRef.current.add(src);
-        if (src === currentSrcRef.current) {
-          setIsLoading(false);
-        }
-      } else {
-        if (src === currentSrcRef.current) {
-          setIsLoading(true);
-        }
-      }
-    };
-
-    checkIfCached();
     setHasError(false);
   }, [src]);
 
@@ -104,26 +55,24 @@ export const AudioPreview: React.FC<AudioPreviewProps> = ({
       isLoading={isLoading}
       hasError={hasError}
       controls={{
-        showClose: true,
+        // showClose: true,
         enableBackdropClose: true,
-        showDownload: true,
-        showNavigation: true,
+        // showDownload: true,
+        // showNavigation: true,
         ...controls
       }}
       {...restProps}
     >
       <div className="flex flex-col items-center">
-        <audio
-          controls
-          className={cn(
-            "max-w-full shadow-2xl",
-            (isLoading || hasError) && "opacity-0"
-          )}
+        <Audio
           src={src}
-          onLoadedData={handleLoad}
-          onCanPlay={handleLoad}
-          onLoadedMetadata={handleLoad}
+          onLoad={handleLoad}
           onError={handleError}
+          onNext={controls?.onNext}
+          onPrev={controls?.onPrev}
+          onDownload={controls?.onDownload}
+          onClose={controls?.onClose}
+          className={isLoading || hasError ? "opacity-0" : ""}
         />
       </div>
     </PreviewBase>

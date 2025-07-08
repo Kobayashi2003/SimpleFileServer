@@ -156,79 +156,295 @@ export const EPUBReader = ({
   const setupRendition = (rendition: Rendition) => {
     renditionRef.current = rendition;
 
-    const spine_get = rendition.book.spine.get.bind(rendition.book.spine);
-    rendition.book.spine.get = (target: string) => {
-      let t = spine_get(target);
-
-      if (!t && target.startsWith("../")) {
-        t = spine_get(target.substring(3));
-      }
-
-      if (!t) {
-        t = spine_get(undefined);
-      }
-
-      return t;
-    }
-
-    // Check if this is a fixed layout EPUB
-    const book = rendition.book as any;
-    const fixedLayout = book.package?.metadata?.layout === "pre-paginated";
-
-    if (fixedLayout) {
-      const originalNext = rendition.next.bind(rendition);
-      const originalPrev = rendition.prev.bind(rendition);
-
-      rendition.next = () => {
-        try {
-          const currentLoc = (rendition as any).currentLocation();
-          if (currentLoc?.start) {
-            const currentIndex = currentLoc.start.index;
-            const nextIndex = currentIndex + 1;
-
-            const nextSpineItem = rendition.book.spine.get(nextIndex);
-            if (nextSpineItem) {
-              return rendition.display(nextSpineItem.href);
-            }
-          }
-          return originalNext();
-        } catch (e) {
-          console.error("Error in custom next:", e);
-          return Promise.resolve();
-        }
-      };
-
-      rendition.prev = () => {
-        try {
-          const currentLoc = (rendition as any).currentLocation();
-          if (currentLoc?.start) {
-            const currentIndex = currentLoc.start.index;
-            if (currentIndex > 0) {
-              const prevIndex = currentIndex - 1;
-              const prevSpineItem = rendition.book.spine.get(prevIndex);
-              if (prevSpineItem) {
-                return rendition.display(prevSpineItem.href);
-              }
-            }
-          }
-          return originalPrev();
-        } catch (e) {
-          console.error("Error in custom prev:", e);
-          return Promise.resolve();
-        }
-      };
-    }
-
+    // *** Apply theme settings first
+    // ******************************************************
     rendition.themes.fontSize(`${fontSize}%`);
     applyFontFamily(rendition);
 
-    if (darkMode) {
-      rendition.themes.override('color', '#fff');
-      rendition.themes.override('background', '#000');
-    } else {
-      rendition.themes.override('color', '#000');
-      rendition.themes.override('background', '#fff');
+    const themeColors = darkMode ?
+      { text: '#fff', background: '#000' } :
+      { text: '#000', background: '#fff' };
+
+    rendition.themes.override('color', themeColors.text);
+    rendition.themes.override('background', themeColors.background);
+
+    // *** Enhanced spine item getter with relative path support
+    // ******************************************************
+    const getSpineItem = rendition.book.spine.get.bind(rendition.book.spine);
+    rendition.book.spine.get = (target: string) => {
+      let spineItem = getSpineItem(target);
+
+      if (!spineItem && target?.startsWith("../")) {
+        spineItem = getSpineItem(target.substring(3));
+      }
+
+      if (!spineItem) {
+        spineItem = getSpineItem(undefined);
+      }
+
+      return spineItem;
     }
+
+    // *** Layout Analysis
+    // ******************************************************
+    const book = rendition.book as any;
+    const metadata = book.package?.metadata;
+    const spine = book.spine;
+    
+    const layoutAnalysis = {
+      // Global layout mode
+      globalLayout: metadata?.layout || 'reflowable',
+      
+      // Global spread mode
+      globalSpread: metadata?.spread || 'auto',
+      
+      // Fixed layout detection
+      hasFixedLayoutItems: spine?.items?.some((item: any) =>
+        item.properties?.includes('rendition:layout-pre-paginated')
+      ),
+      
+      // Spread properties analysis
+      spreadProperties: {
+        hasSpreadNone: spine?.items?.some((item: any) =>
+          item.properties?.includes('rendition:spread-none')
+        ),
+        hasSpreadLeft: spine?.items?.some((item: any) =>
+          item.properties?.includes('page-spread-left')
+        ),
+        hasSpreadRight: spine?.items?.some((item: any) =>
+          item.properties?.includes('page-spread-right')
+        ),
+        hasSpreadCenter: spine?.items?.some((item: any) =>
+          item.properties?.includes('page-spread-center')
+        )
+      },
+      
+      // Orientation properties
+      orientation: metadata?.orientation || 'auto',
+      orientationLock: metadata?.['orientation-lock'],
+      
+      // Writing mode
+      writingMode: metadata?.['primary-writing-mode'] || 'horizontal-lr'
+    };
+
+    // *** Determine navigation strategy
+    // ******************************************************
+    const isFixedLayout = layoutAnalysis.globalLayout === 'pre-paginated' || 
+                         layoutAnalysis.hasFixedLayoutItems;
+    
+    // *** Setup content hooks
+    // ******************************************************
+    rendition.hooks.content.register((contents: any) => {
+      const spineItem = contents.spineItem;
+      if (!spineItem?.properties) return;
+
+      // Apply fixed layout settings
+      if (spineItem.properties.includes('rendition:layout-pre-paginated')) {
+        const viewportSettings = {
+          width: "100%",
+          height: "100%",
+          scale: 1.0,
+          spread: "none"
+        };
+        Object.assign(contents.viewport, viewportSettings);
+      }
+
+      // Apply spread position
+      if (spineItem.properties.includes('rendition:spread-none')) {
+        contents.viewport.spread = "none";
+      } else if (spineItem.properties.includes('page-spread-left')) {
+        contents.viewport.spread = "left";
+      } else if (spineItem.properties.includes('page-spread-right')) {
+        contents.viewport.spread = "right";
+      } else if (spineItem.properties.includes('page-spread-center')) {
+        contents.viewport.spread = "center";
+      }
+
+      // Apply writing mode if specified
+      if (layoutAnalysis.writingMode === 'horizontal-rl') {
+        contents.document.documentElement.style.direction = 'rtl';
+        contents.document.documentElement.style.writingMode = 'horizontal-rl';
+      }
+    });
+
+    // *** Apply global spread mode
+    // ******************************************************
+    let globalSpreadMode: string;
+    
+    if (isFixedLayout) {
+      // For fixed layout, respect individual spine item properties
+      // but fall back to global setting
+      if (layoutAnalysis.spreadProperties.hasSpreadNone) {
+        globalSpreadMode = "none";
+      } else {
+        globalSpreadMode = layoutAnalysis.globalSpread;
+      }
+    } else {
+      // For reflowable layout, use global spread setting
+      globalSpreadMode = layoutAnalysis.globalSpread;
+    }
+    
+    rendition.spread(globalSpreadMode);
+
+    // *** Navigation Helper Functions
+    // ******************************************************
+    
+    // Check if current spine item is fixed layout
+    const isCurrentSpineItemFixed = (currentLocation: any) => {
+      if (!currentLocation?.start) return false;
+      const currentSpineItem = rendition.book.spine.get(currentLocation.start.index);
+      return currentSpineItem?.properties?.includes('rendition:layout-pre-paginated');
+    };
+
+    // Check if we should use content flow navigation
+    const shouldUseContentFlow = (currentLocation: any) => {
+      return layoutAnalysis.globalLayout === 'reflowable' && 
+             !isCurrentSpineItemFixed(currentLocation);
+    };
+
+    // Calculate next spine index for fixed layout navigation
+    const getNextSpineIndex = (currentLocation: any) => {
+      const currentIndex = currentLocation.start.index;
+      const spineItems = (rendition.book.spine as any).items;
+      
+      // Check if we're at the end
+      if (currentIndex >= spineItems.length - 1) {
+        return null;
+      }
+
+      let nextIndex = currentIndex + 1;
+      
+      // Handle double-page mode
+      if (currentLocation.end && currentLocation.start.index !== currentLocation.end.index) {
+        nextIndex = Math.max(currentLocation.start.index, currentLocation.end.index) + 1;
+      }
+
+      // Ensure we don't exceed total items
+      if (nextIndex >= spineItems.length) {
+        return null;
+      }
+
+      return nextIndex;
+    };
+
+    // Calculate previous spine index for fixed layout navigation
+    const getPrevSpineIndex = (currentLocation: any) => {
+      const currentIndex = currentLocation.start.index;
+      
+      // Check if we're at the beginning
+      if (currentIndex <= 0) {
+        return null;
+      }
+
+      let prevIndex = currentIndex - 1;
+      
+      // Handle double-page mode
+      if (currentLocation.end && currentLocation.start.index !== currentLocation.end.index) {
+        prevIndex = Math.min(currentLocation.start.index, currentLocation.end.index) - 2;
+        
+        // If we can't go back 2 positions, go back 1 position
+        if (prevIndex < 0) {
+          prevIndex = Math.min(currentLocation.start.index, currentLocation.end.index) - 1;
+        }
+      }
+
+      // Ensure we don't go below 0
+      if (prevIndex < 0) {
+        return null;
+      }
+
+      return prevIndex;
+    };
+
+    // Handle spine item display with spread properties
+    const displaySpineItem = (spineItem: any, currentLocation: any) => {
+      if (!spineItem) return originalNavigation.next();
+
+      const isCurrentItemFixed = isCurrentSpineItemFixed(currentLocation);
+
+      // Handle spread properties for fixed layout items
+      if (isFixedLayout || isCurrentItemFixed) {
+        if (spineItem.properties?.includes('rendition:spread-none')) {
+          return rendition.display(spineItem.href);
+        } else if (spineItem.properties?.includes('page-spread-left')) {
+          return rendition.display(spineItem.href);
+        } else if (spineItem.properties?.includes('page-spread-right')) {
+          return rendition.display(spineItem.href);
+        } else if (spineItem.properties?.includes('page-spread-center')) {
+          return rendition.display(spineItem.href);
+        }
+      }
+
+      // Handle global spread settings
+      if (layoutAnalysis.globalSpread === 'both') {
+        // For forced double-page spread, we might need special handling
+        // For now, just display the item normally
+      }
+
+      // Default: display the item
+      return rendition.display(spineItem.href);
+    };
+
+    // *** Create navigation strategy
+    // ******************************************************
+    const originalNavigation = {
+      next: rendition.next.bind(rendition),
+      prev: rendition.prev.bind(rendition)
+    };
+
+    // Enhanced next page navigation
+    rendition.next = () => {
+      try {
+        const currentLocation = (rendition as any).currentLocation();
+        if (!currentLocation?.start) {
+          return originalNavigation.next();
+        }
+
+        // For reflowable layout and non-fixed spine items, use original navigation (content flow)
+        if (shouldUseContentFlow(currentLocation)) {
+          return originalNavigation.next();
+        }
+
+        // For fixed layout or fixed spine items, use spine index navigation
+        const nextIndex = getNextSpineIndex(currentLocation);
+        if (nextIndex === null) {
+          return Promise.resolve();
+        }
+
+        const nextSpineItem = rendition.book.spine.get(nextIndex);
+        return displaySpineItem(nextSpineItem, currentLocation);
+      } catch (error) {
+        console.error("Error in EPUB 3.0 compliant next navigation:", error);
+        return originalNavigation.next();
+      }
+    };
+
+    // Enhanced previous page navigation
+    rendition.prev = () => {
+      try {
+        const currentLocation = (rendition as any).currentLocation();
+        if (!currentLocation?.start) {
+          return originalNavigation.prev();
+        }
+
+        // For reflowable layout and non-fixed spine items, use original navigation (content flow)
+        if (shouldUseContentFlow(currentLocation)) {
+          return originalNavigation.prev();
+        }
+
+        // For fixed layout or fixed spine items, use spine index navigation
+        const prevIndex = getPrevSpineIndex(currentLocation);
+        if (prevIndex === null) {
+          return Promise.resolve();
+        }
+
+        const prevSpineItem = rendition.book.spine.get(prevIndex);
+        return displaySpineItem(prevSpineItem, currentLocation);
+      } catch (error) {
+        console.error("Error in EPUB 3.0 compliant prev navigation:", error);
+        return originalNavigation.prev();
+      }
+    };
   };
 
   const clearHighlights = () => {
@@ -472,6 +688,8 @@ export const EPUBReader = ({
             flow: "paginated",
             manager: "default",
             allowScriptedContent: true,
+            width: "100%",
+            height: "100%",
           }}
           searchQuery={searchQuery}
           onSearchResults={setSearchResults}

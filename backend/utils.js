@@ -53,7 +53,7 @@ function getFileTypeByExt(extension) {
     // Application
     '.cbz': 'application/cbz',
     '.cbr': 'application/cbr',
-    '.epub': 'application/epub',
+    '.epub': 'application/epub+zip',
     '.pdf': 'application/pdf',
     ...config.customContentTypes
   };
@@ -70,7 +70,7 @@ async function getFileType(filePath) {
   if (config.useMimeMagic) {
     if (extension === '.cbz') return 'application/cbz';
     if (extension === '.cbr') return 'application/cbr';
-    if (extension === '.epub') return 'application/epub';
+    if (extension === '.epub') return 'application/epub+zip';
     try {
       return await getFileTypeByMime(filePath);
     } catch (error) {

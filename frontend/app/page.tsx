@@ -123,7 +123,7 @@ function FileExplorerContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [sortBy, setSortBy] = useState<'name' | 'size' | 'date'>('name');
+  const [sortBy, setSortBy] = useState<'name' | 'size' | 'mtime'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [recursiveSearch, setRecursiveSearch] = useState(true);
 
@@ -527,6 +527,10 @@ function FileExplorerContent() {
       type: getPreviewType(mimeType),
       currentIndex
     });
+
+    // Focus on the item and scroll to it
+    setFocusedFileIndex(currentIndex);
+    scrollToFocusedItem(currentIndex);
   }, [accumulatedFiles]);
 
   const closePreview = useCallback(() => {
@@ -548,6 +552,9 @@ function FileExplorerContent() {
       } else {
         newIndex = (preview.currentIndex - 1 + accumulatedFiles.length) % accumulatedFiles.length;
       }
+      // Update the focused item and scroll to it
+      setFocusedFileIndex(newIndex);
+      scrollToFocusedItem(newIndex);
       openPreview(accumulatedFiles[newIndex].path, accumulatedFiles[newIndex].mimeType || '');
       return;
     }
@@ -564,6 +571,13 @@ function FileExplorerContent() {
       newIndex = (currentIndex + 1) % sameTypeFiles.length;
     } else {
       newIndex = (currentIndex - 1 + sameTypeFiles.length) % sameTypeFiles.length;
+    }
+
+    // Find the actual index in accumulatedFiles
+    const actualFileIndex = accumulatedFiles.findIndex(file => file.path === sameTypeFiles[newIndex].path);
+    if (actualFileIndex !== -1) {
+      setFocusedFileIndex(actualFileIndex);
+      scrollToFocusedItem(actualFileIndex);
     }
 
     openPreview(sameTypeFiles[newIndex].path, sameTypeFiles[newIndex].mimeType || '');
@@ -1005,21 +1019,21 @@ function FileExplorerContent() {
     };
 
     xhr.send();
-  }, []);
+  }, [token]);
 
   const handleDownloadMultiple = useCallback((paths: string[]) => {
     // This version will send a request to the backend's download endpoint,
     // and the final download will be a zip file.
 
     // TODO: Implement this version
-  }, []);
+  }, [token]);
 
   const handleDownloadMultiple2 = useCallback((paths: string[]) => {
     if (paths.length === 0) return;
     paths.forEach(path => {
       handleDownload(path);
     });
-  }, []);
+  }, [handleDownload]);
 
   const cancelDownload = (fileId: string) => {
     const xhr = xhrRefsRef.current.get(fileId);
@@ -1074,7 +1088,7 @@ function FileExplorerContent() {
     }).catch((error) => {
       console.error('Error renaming file:', error);
     });
-  }, [token, refetchData, fileToRename]);
+  }, [fileToRename, token, refetchData]);
 
   const handleRenameCancel = useCallback(() => {
     setRenameInputDialogOpen(false);
@@ -1124,6 +1138,7 @@ function FileExplorerContent() {
     setFileToDelete('');
     setDeleteComfirmDialogOpen(false);
   }, []);
+
 
   const handleDeleteMultiple = useCallback((paths: string[]) => {
     setDeleteMultipleDialogOpen(true);
@@ -1410,7 +1425,7 @@ function FileExplorerContent() {
   }, [currentPath, searchQuery, isChangingPath])
 
 
-  // Add this function before the keyboard handler useEffect
+  // Function to scroll to focused item in different view modes
   const scrollToFocusedItem = useCallback((index: number) => {
     if (index < 0 || index >= accumulatedFiles.length) return;
 
@@ -2096,15 +2111,15 @@ function FileExplorerContent() {
                       Size {sortBy === 'size' && (sortOrder === 'asc' ? '↑' : '↓')}
                     </Button>
                     <Button
-                      variant={sortBy === 'date' ? "default" : "ghost"}
+                      variant={sortBy === 'mtime' ? "default" : "ghost"}
                       size="sm"
                       className="justify-start"
                       onClick={() => {
-                        setSortBy('date');
-                        setSortOrder(sortBy === 'date' ? (sortOrder === 'asc' ? 'desc' : 'asc') : 'asc');
+                        setSortBy('mtime');
+                        setSortOrder(sortBy === 'mtime' ? (sortOrder === 'asc' ? 'desc' : 'asc') : 'asc');
                       }}
                     >
-                      Date {sortBy === 'date' && (sortOrder === 'asc' ? '↑' : '↓')}
+                      Date {sortBy === 'mtime' && (sortOrder === 'asc' ? '↑' : '↓')}
                     </Button>
                   </div>
                 </PopoverContent>

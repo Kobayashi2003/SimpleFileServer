@@ -127,7 +127,7 @@ export const Video = ({
   // Double click detection
   const singleClickDelayRef = useRef<NodeJS.Timeout | null>(null);
   const isDoubleClickProcessingRef = useRef(false);
-  const SINGLE_CLICK_DELAY = 250; // ms
+  const SINGLE_CLICK_DELAY = 100; // ms
 
   // Format time in MM:SS format
   const formatTime = (seconds: number) => {
@@ -765,12 +765,16 @@ export const Video = ({
   // Handle simple click outside controls area
   const handleClickOutsideControls = (clientX: number, clientY: number) => {
     if (!isOutsideControlsArea(clientX, clientY)) return;
+    console.log('handleClickOutsideControls');
     
-    const side = getClickSide(clientX);
-    console.log(`Simple click outside controls - Side: ${side}`);
+    // Toggle controls visibility
+    setShowControls(prev => !prev);
+    console.log('handleClickOutsideControls set show controls to:', !showControls);
     
-    // TODO: Implement click outside controls logic
-    // Example: Toggle play/pause for center area clicks
+    // Reset the controls timeout if we're showing controls
+    if (!showControls) {
+      resetControlsTimeout();
+    }
   };
 
   // Handle simple click outside controls area with delay
@@ -846,7 +850,7 @@ export const Video = ({
       startLongPressTimer(e.clientX, e.clientY);
     }
     
-    resetControlsTimeout();
+    // resetControlsTimeout();
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -939,7 +943,7 @@ export const Video = ({
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    // console.log('handleTouchStart');
+    console.log('handleTouchStart');
     // e.preventDefault();
     e.stopPropagation();
 
@@ -957,11 +961,11 @@ export const Video = ({
       startLongPressTimer(e.touches[0].clientX, e.touches[0].clientY);
     }
     
-    resetControlsTimeout();
+    // resetControlsTimeout();
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // console.log('handleTouchMove');
+    console.log('handleTouchMove');
     // e.preventDefault();
     e.stopPropagation();
     resetControlsTimeout();
@@ -1013,7 +1017,7 @@ export const Video = ({
   };
 
   const handleTouchEnd = (e?: React.TouchEvent) => {
-    // console.log('handleTouchEnd');
+    console.log('handleTouchEnd');
     // e?.preventDefault();
     e?.stopPropagation();
     
@@ -1050,30 +1054,33 @@ export const Video = ({
   };
 
   const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    console.log('handleProgressClick');
     e.preventDefault();
     e.stopPropagation();
     if (!showControls) return;
+    console.log('handleProgressClick');
     if (progressRef.current && duration > 0) {
       const rect = progressRef.current.getBoundingClientRect();
       const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const newTime = pos * duration;
       updatePendingTimeWithoutTimeout(newTime, false, true);
       applyPendingTime();
+      resetControlsTimeout();
     }
   }
 
   const handleProgressMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    console.log('handleProgressMouseDown');
     e.preventDefault();
     e.stopPropagation();
+    if (!showControls) return;
+    console.log('handleProgressMouseDown');
     isMouseDraggingProgressRef.current = true;
   }
 
   const handleProgressMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    console.log('handleProgressMouseMove');
     e.preventDefault();
     e.stopPropagation();
+    if (!showControls) return;
+    console.log('handleProgressMouseMove');
     if (isMouseDraggingProgressRef.current && progressRef.current && duration > 0) {
       const rect = progressRef.current.getBoundingClientRect();
       const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -1083,9 +1090,10 @@ export const Video = ({
   }
 
   const handleProgressMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
-    console.log('handleProgressMouseUp');
     e.preventDefault();
     e.stopPropagation();
+    if (!showControls) return;
+    console.log('handleProgressMouseUp');
     if (isMouseDraggingProgressRef.current) {
       applyPendingTime();
       isMouseDraggingProgressRef.current = false;
@@ -1093,16 +1101,18 @@ export const Video = ({
   }
 
   const handleProgressTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    // console.log('handleProgressTouchStart');
     // e.preventDefault();
     e.stopPropagation();
+    if (!showControls) return;
+    console.log('handleProgressTouchStart');
     isTouchDraggingRef.current = true;
   }
 
   const handleProgressTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    // console.log('handleProgressTouchMove');
     // e.preventDefault();
     e.stopPropagation();
+    if (!showControls) return;
+    console.log('handleProgressTouchMove');
     if (isTouchDraggingRef.current && progressRef.current && duration > 0) {
       const rect = progressRef.current.getBoundingClientRect();
       const pos = Math.max(0, Math.min(1, (e.touches[0].clientX - rect.left) / rect.width));
@@ -1112,8 +1122,9 @@ export const Video = ({
   }
 
   const handleProgressTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
-    // console.log('handleProgressTouchEnd');
     // e.preventDefault();
+    if (!showControls) return;
+    console.log('handleProgressTouchEnd');
     // We don't need to handle this event here, it will be handled by the parent
   }
 
@@ -1246,13 +1257,13 @@ export const Video = ({
       {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center z-40">
           <div
-            className="bg-black/40 rounded-full p-5 cursor-pointer hover:bg-black/70 transition-colors"
+            className="bg-black/40 rounded-full p-4 cursor-pointer hover:bg-black/70 transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               togglePlay();
             }}
           >
-            <Play size={40} />
+            <Play size={containerWidth > 768 ? 40 : 20} />
           </div>
         </div>
       )}
@@ -1272,7 +1283,8 @@ export const Video = ({
           "controls",
           "absolute bottom-0 left-0 right-0 z-40",
           "flex flex-col items-center justify-center gap-2",
-          "px-4 pt-16 pb-4",
+          // "px-4 pt-16 pb-4",
+          "px-2 pb-2",
           "bg-gradient-to-t from-black/80 to-transparent",
           "transition-opacity duration-300",
           showControls ? "opacity-100" : "opacity-0",
@@ -1317,14 +1329,14 @@ export const Video = ({
         </div>
 
         {/* Controls grid layout */}
-        <div className={`grid ${getLayoutClass()} gap-y-4 items-center w-full`}>
+        <div className={`grid ${getLayoutClass()} ${containerWidth > 768 ? "gap-y-4" : "gap-y-1"} items-center w-full`}>
           {/* Time display - Left section */}
           <div className={`flex ${containerWidth > 768 ? "justify-start" : "justify-center"} items-center`}>
             {formatTime(getDisplayTime())} / {formatTime(duration)}
           </div>
 
           {/* Playback controls - Center section */}
-          <div className="flex justify-center items-center gap-4">
+          <div className={`flex justify-center items-center ${containerWidth > 768 ? "gap-4" : "gap-2"}`}>
             {/* Skip backward button */}
             <button
               onClick={() => skip(-10)}

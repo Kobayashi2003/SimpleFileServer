@@ -29,7 +29,7 @@ export function getPreviewType(mimeType: string) {
     case 'application':
       if (mimeType === 'application/pdf') {
         return 'pdf';
-      } else if (mimeType === 'application/epub') {
+      } else if (mimeType === 'application/epub+zip') {
         return 'epub';
       } else if (mimeType === 'application/cbz' || mimeType === 'application/cbr') {
         return 'comic';

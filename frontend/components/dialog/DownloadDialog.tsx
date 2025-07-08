@@ -118,7 +118,7 @@ export function DownloadDialog({
                 </div>
                 {file.status === 'error' && (
                   <p className="text-xs text-red-400">
-                    {file.error || 'Error downloading'}
+                    {file.error || 'Error downloading'}&nbsp;
                     <Button
                       variant="link"
                       size="sm"
@@ -131,7 +131,7 @@ export function DownloadDialog({
                 )}
                 {file.status === 'completed' && (
                   <p className="text-xs text-green-400">
-                    Download completed
+                    Download completed&nbsp;
                     <Button
                       variant="link"
                       size="sm"

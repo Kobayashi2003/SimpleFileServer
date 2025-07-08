@@ -32,6 +32,14 @@ const PORT = config.port;
 app.use(cors());
 app.use(express.json());
 
+app.get('/api/version', (req, res) => {
+  res.json({
+    version: '1.0.0',
+    username: req.user?.username,
+    permissions: req.user?.permissions || 'none'
+  });
+});
+
 app.get('/api/bg', (req, res) => {
   try {
     // Get the background image path from config
@@ -156,6 +164,14 @@ app.get('/api/bgs', async (req, res) => {
   }
 })
 
+app.get('/api/validate-token', (req, res) => {
+  res.json({
+    isAuthenticated: true,
+    username: req.user?.username,
+    permissions: req.user?.permissions || 'none'
+  });
+});
+
 // Apply authentication middleware to all other routes
 app.use(authMiddleware);
 
@@ -198,23 +214,6 @@ if (config.useFileWatcher) {
   }
 }
 
-
-app.get('/api/version', (req, res) => {
-  res.json({
-    version: '1.0.0',
-    username: req.user?.username,
-    permissions: req.user?.permissions || 'none'
-  });
-});
-
-app.get('/api/validate-token', (req, res) => {
-  res.json({
-    isAuthenticated: true,
-    username: req.user?.username,
-    permissions: req.user?.permissions || 'none'
-  });
-});
-
 app.get('/api/files', async (req, res) => {
   const { dir = '', cover = 'false', page, limit = 100, sortBy = 'name', sortOrder = 'asc' } = req.query;
   const basePath = path.resolve(config.baseDirectory);
@@ -225,8 +224,8 @@ app.get('/api/files', async (req, res) => {
   }
 
   try {
-    // Use file index if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    // Use file index if enabled for files API
+    if (config.useFileIndexForFilesApi && config.useFileIndex && indexer.isIndexBuilt()) {
       // Get directory files from index with pagination
       const result = await indexer.getDirectoryFiles(dir, page, limit, sortBy, sortOrder, cover === 'true');
       return res.json({
@@ -607,7 +606,7 @@ app.get('/api/images/random', (req, res) => {
 })
 
 app.get('/api/audios', (req, res) => {
-  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc'  } = req.query;
+  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc' } = req.query;
   const basePath = path.resolve(config.baseDirectory);
   const searchPath = path.join(basePath, dir);
 
@@ -669,7 +668,7 @@ app.get('/api/audios/random', (req, res) => {
 })
 
 app.get('/api/videos', (req, res) => {
-  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc'  } = req.query;
+  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc' } = req.query;
   const basePath = path.resolve(config.baseDirectory);
   const searchPath = path.join(basePath, dir);
 
@@ -1084,7 +1083,7 @@ app.get('/api/thumbnail', async (req, res) => {
             fs.unlinkSync(outputPath);
           }
         });
-    } else if (mimeType === 'application/epub') {
+    } else if (mimeType === 'application/epub+zip') {
       // Extract cover image from EPUB file using adm-zip
       try {
         // Cache mechanism: generate cache path using hash
@@ -1116,7 +1115,7 @@ app.get('/api/thumbnail', async (req, res) => {
         }
 
         const containerXml = containerEntry.getData().toString('utf8');
-        
+
         // Extract rootfile path from container.xml
         const rootfileMatch = containerXml.match(/<rootfile[^>]*full-path="([^"]*)"[^>]*>/);
         if (!rootfileMatch) {
@@ -1130,10 +1129,10 @@ app.get('/api/thumbnail', async (req, res) => {
         }
 
         const contentOpfXml = contentOpfEntry.getData().toString('utf8');
-        
+
         // Extract cover image ID from content.opf using multiple methods
         let coverId = null;
-        
+
         // Method 1: Look for cover in metadata
         const metaMatches = contentOpfXml.match(/<meta[^>]*>/g);
         if (metaMatches) {
@@ -1142,7 +1141,7 @@ app.get('/api/thumbnail', async (req, res) => {
             const parts = metaMatch.split(/\s+/);
             let metaName = null;
             let metaContent = null;
-            
+
             for (const part of parts) {
               if (part.startsWith('name=')) {
                 // Extract name value
@@ -1158,14 +1157,14 @@ app.get('/api/thumbnail', async (req, res) => {
                 }
               }
             }
-            
+
             if (metaName === 'cover' && metaContent) {
               coverId = metaContent;
               break;
             }
           }
         }
-        
+
         // Method 2: Look for cover in manifest with properties="cover-image" or id="cover"
         if (!coverId) {
           // Find all item tags and parse them more carefully
@@ -1191,7 +1190,7 @@ app.get('/api/thumbnail', async (req, res) => {
                 coverId = itemId;
                 break;
               }
-              
+
               // Extract and check properties value
               let itemProperties = null;
               for (const part of parts) {
@@ -1211,7 +1210,7 @@ app.get('/api/thumbnail', async (req, res) => {
             }
           }
         }
-        
+
         if (!coverId) {
           return res.status(404).json({ error: 'No cover image found in EPUB' });
         }
@@ -1219,13 +1218,13 @@ app.get('/api/thumbnail', async (req, res) => {
         // Find the cover image entry in manifest using the same parsing approach
         const coverItemMatches = contentOpfXml.match(/<item[^>]*>/g);
         let coverHref = null;
-        
+
         if (coverItemMatches) {
           for (const itemMatch of coverItemMatches) {
             const parts = itemMatch.split(/\s+/);
             let itemId = null;
             let href = null;
-            
+
             for (const part of parts) {
               if (part.startsWith('id=')) {
                 const idMatch = part.match(/id="([^"]*)"/);
@@ -1239,22 +1238,22 @@ app.get('/api/thumbnail', async (req, res) => {
                 }
               }
             }
-            
+
             if (itemId === coverId && href) {
               coverHref = href;
               break;
             }
           }
         }
-        
+
         if (!coverHref) {
           return res.status(404).json({ error: 'Cover image not found in EPUB manifest' });
         }
-        
+
         // Resolve relative path to absolute path within EPUB
         const contentOpfDir = path.dirname(contentOpfPath);
         const coverPath = path.join(contentOpfDir, coverHref).replace(/\\/g, '/');
-        
+
         // Find the cover image in ZIP entries
         const coverEntry = entries.find(entry => entry.entryName === coverPath);
         if (!coverEntry) {
@@ -1266,7 +1265,7 @@ app.get('/api/thumbnail', async (req, res) => {
 
         // Process cover image with Sharp
         const sharp = require('sharp');
-        
+
         let transformer = sharp(coverData)
           .rotate() // Auto-rotate based on EXIF data
           .resize({
@@ -1392,13 +1391,13 @@ app.get('/api/comic', async (req, res) => {
       try {
         // Read RAR file
         const rarData = fs.readFileSync(fullPath);
-        
+
         // Create extractor with buffer data
         const extractor = await unrar.createExtractorFromData({
           data: rarData.buffer,
           password: undefined // Add password here if needed
         });
-        
+
         // Get file list
         const list = extractor.getFileList();
         if (!list || !list.fileHeaders) {
@@ -1407,7 +1406,7 @@ app.get('/api/comic', async (req, res) => {
 
         // Convert iterable to array for processing
         const fileHeadersArray = [...list.fileHeaders];
-        
+
         // Filter image files
         const imageEntries = fileHeadersArray.filter(header => {
           const ext = path.extname(header.name).toLowerCase();
@@ -1436,7 +1435,7 @@ app.get('/api/comic', async (req, res) => {
         // Extract the files - we need to extract all files, and then filter
         const extracted = extractor.extract();
         const files = [...extracted.files];
-        
+
         // Process each file
         for (const file of files) {
           // Skip if not an image file
@@ -1444,19 +1443,19 @@ app.get('/api/comic', async (req, res) => {
           if (!['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
             continue;
           }
-          
+
           // Get content
           if (!file.extraction) {
             continue;
           }
-          
+
           // Save to temp file
           const entryPath = path.join(tempDir, file.fileHeader.name);
-          
+
           // Create directory structure if needed
           const entryDir = path.dirname(entryPath);
           fs.mkdirSync(entryDir, { recursive: true });
-          
+
           // Write the file
           fs.writeFileSync(entryPath, file.extraction);
 
@@ -1491,11 +1490,7 @@ app.post('/api/upload', writePermissionMiddleware, (req, res) => {
   }
 
   if (!fs.existsSync(uploadPath)) {
-    try {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    } catch (error) {
-      return res.status(500).json({ error: `Failed to create directory: ${error.message}` });
-    }
+    return res.status(400).json({ error: "Upload directory does not exist" });
   }
 
   // Configure multer storage
@@ -1538,7 +1533,7 @@ app.post('/api/upload', writePermissionMiddleware, (req, res) => {
     }));
 
     // Update indexer if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
       try {
         // Prepare files for indexer in the required format
         const filesForIndex = uploadedFiles.map(file => ({
@@ -1574,13 +1569,9 @@ app.post('/api/upload-folder', writePermissionMiddleware, (req, res) => {
     return res.status(403).json({ error: "Access denied" });
   }
 
-  // Ensure base upload directory exists
+  // Ensure upload directory exists
   if (!fs.existsSync(uploadPath)) {
-    try {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    } catch (error) {
-      return res.status(500).json({ error: `Failed to create directory: ${error.message}` });
-    }
+    return res.status(400).json({ error: "Upload directory does not exist" });
   }
 
   // Configure multer storage with directory structure preservation
@@ -1656,7 +1647,7 @@ app.post('/api/upload-folder', writePermissionMiddleware, (req, res) => {
     });
 
     // Update indexer if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
       try {
         // Prepare files for indexer in the required format
         const filesForIndex = uploadedFiles.map(file => ({
@@ -1725,7 +1716,7 @@ app.post('/api/mkdir', writePermissionMiddleware, (req, res) => {
     fs.mkdirSync(fullPath, { recursive: true });
 
     // Update indexer if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
       try {
         const stats = fs.statSync(fullPath);
         const relativePath = path.join(dirPath, dirName).replace(/\\/g, '/');
@@ -1769,7 +1760,7 @@ app.post('/api/rename', writePermissionMiddleware, async (req, res) => {
     fs.renameSync(fullPath, newPath);
 
     // Update indexer if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
       try {
         // Delete the old entry
         indexer.deleteFromIndex(filePath);
@@ -1887,7 +1878,7 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
         const success = utils.safeDeleteDirectory(fullPath);
 
         // Update indexer if enabled
-        if (config.useFileIndex && indexer.isIndexBuilt()) {
+        if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
           indexer.deleteFromIndex(filePath);
           console.log(`Removed directory "${filePath}" from index`);
         }
@@ -1901,7 +1892,7 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
         fs.unlinkSync(fullPath);
 
         // Update indexer if enabled
-        if (config.useFileIndex && indexer.isIndexBuilt()) {
+        if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
           indexer.deleteFromIndex(filePath);
           console.log(`Removed file "${filePath}" from index`);
         }
@@ -1935,14 +1926,14 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
           }
 
           // Update indexer if enabled
-          if (config.useFileIndex && indexer.isIndexBuilt()) {
+          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
             indexer.deleteFromIndex(relativePath);
           }
         } else {
           fs.unlinkSync(fullPath);
 
           // Update indexer if enabled
-          if (config.useFileIndex && indexer.isIndexBuilt()) {
+          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
             indexer.deleteFromIndex(relativePath);
           }
         }
@@ -1974,7 +1965,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
       fs.mkdirSync(destDir, { recursive: true });
 
       // Add new directory to index if it didn't exist before
-      if (config.useFileIndex && indexer.isIndexBuilt()) {
+      if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
         const destStats = fs.statSync(destDir);
         indexer.saveFileBatch([{
           name: path.basename(destination),
@@ -2012,7 +2003,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
           copyFolderRecursiveSync(sourcePath, destPath);
 
           // For indexing, we need to collect all files in the directory
-          if (config.useFileIndex && indexer.isIndexBuilt()) {
+          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
             // First add the directory itself
             filesToIndex.push({
               name: path.basename(source),
@@ -2038,7 +2029,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
           fs.copyFileSync(sourcePath, destPath);
 
           // Add file to index
-          if (config.useFileIndex && indexer.isIndexBuilt()) {
+          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
             const newStats = fs.statSync(destPath);
             // Get file type asynchronously but don't wait for it, add to index after
             utils.getFileType(destPath)
@@ -2064,7 +2055,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
     }
 
     // Add non-directory files to index in a batch
-    if (config.useFileIndex && indexer.isIndexBuilt() && filesToIndex.length > 0) {
+    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt() && filesToIndex.length > 0) {
       indexer.saveFileBatch(filesToIndex);
       console.log(`Added ${filesToIndex.length} cloned items to the index`);
     }
@@ -2090,7 +2081,7 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
       fs.mkdirSync(destDir, { recursive: true });
 
       // Add new directory to index if it didn't exist before
-      if (config.useFileIndex && indexer.isIndexBuilt()) {
+      if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
         const destStats = fs.statSync(destDir);
         indexer.saveFileBatch([{
           name: path.basename(destination),
@@ -2125,7 +2116,7 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
         fs.renameSync(sourcePath, destPath);
 
         // Update index if enabled
-        if (config.useFileIndex && indexer.isIndexBuilt()) {
+        if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
           try {
             // Delete the old entry (and all its children if it's a directory)
             indexer.deleteFromIndex(source);
@@ -2508,7 +2499,9 @@ async function parallelFindImages(dir, basePath) {
     } catch (error) {
       return res.status(500).json({ error: 'Server error' });
     }
+
   }
+
 }
 
 function createSearchWorker(directories, query, basePath) {
@@ -2802,7 +2795,7 @@ function sortFiles(files, sortBy = 'name', sortOrder = 'asc') {
       return sortOrder === 'asc'
         ? a.size - b.size
         : b.size - a.size;
-    } else if (sortBy === 'date') {
+    } else if (sortBy === 'mtime') {
       const dateA = new Date(a.mtime).getTime();
       const dateB = new Date(b.mtime).getTime();
       return sortOrder === 'asc'
@@ -2815,4 +2808,5 @@ function sortFiles(files, sortBy = 'name', sortOrder = 'asc') {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});   console.log(`Server running on port ${PORT}`);
 }); 

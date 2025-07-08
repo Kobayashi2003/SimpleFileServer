@@ -118,7 +118,7 @@ export function UploadDialog({
                 </div>
                 {file.status === 'error' && (
                   <p className="text-xs text-red-400">
-                    {file.error || 'Error uploading'}
+                    {file.error || 'Error uploading'}&nbsp;
                     <Button
                       variant="link"
                       size="sm"
@@ -131,7 +131,7 @@ export function UploadDialog({
                 )}
                 {file.status === 'completed' && (
                   <p className="text-xs text-green-400">
-                    Upload completed
+                    Upload completed&nbsp;
                     <Button
                       variant="link"
                       size="sm"
