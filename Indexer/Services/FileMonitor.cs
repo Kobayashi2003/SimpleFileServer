@@ -37,7 +37,8 @@ public class FileMonitor : IDisposable
                               | NotifyFilters.LastWrite
                               | NotifyFilters.Size,
                 IncludeSubdirectories = true,
-                EnableRaisingEvents = true
+                EnableRaisingEvents = true,
+                InternalBufferSize = 64 * 1024  // 64KB
             };
 
             _watcher.Changed += OnChanged;
@@ -111,12 +112,20 @@ public class FileMonitor : IDisposable
 
         try
         {
-            await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
-            _logger.LogDebug("File changed: {Path}", e.FullPath);
+            if (Directory.Exists(e.FullPath))
+            {
+                await _fileIndexer.UpdateDirectoryEntryAsync(e.FullPath);
+                _logger.LogDebug("Directory changed: {Path}", e.FullPath);
+            }
+            else
+            {
+                await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
+                _logger.LogDebug("File changed: {Path}", e.FullPath);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling file change: {Path}", e.FullPath);
+            _logger.LogError(ex, "Error handling change: {Path}", e.FullPath);
         }
     }
 
@@ -150,13 +159,13 @@ public class FileMonitor : IDisposable
             if (Directory.Exists(e.FullPath))
             {
                 _fileIndexer.DeleteDirectoryEntries(e.FullPath);
+                _logger.LogDebug("Directory deleted: {Path}", e.FullPath);
             }
             else
             {
                 _fileIndexer.DeleteFileEntry(e.FullPath);
+                _logger.LogDebug("File deleted: {Path}", e.FullPath);
             }
-            
-            _logger.LogDebug("File deleted: {Path}", e.FullPath);
         }
         catch (Exception ex)
         {
@@ -173,22 +182,22 @@ public class FileMonitor : IDisposable
 
         try
         {
-            if (Directory.Exists(e.OldFullPath))
+            if (Directory.Exists(e.FullPath))
             {
                 _fileIndexer.DeleteDirectoryEntries(e.OldFullPath);
+                await _fileIndexer.UpdateDirectoryEntryAsync(e.FullPath);
+                _logger.LogDebug("Directory renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
             }
             else
             {
                 _fileIndexer.DeleteFileEntry(e.OldFullPath);
+                await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
+                _logger.LogDebug("File renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
             }
-
-            await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
-            
-            _logger.LogDebug("File renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling file rename: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
+            _logger.LogError(ex, "Error handling rename: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
         }
     }
 

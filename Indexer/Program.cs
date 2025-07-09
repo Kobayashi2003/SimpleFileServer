@@ -28,12 +28,15 @@ class Program
         {
             Arity = ArgumentArity.ZeroOrOne
         };
+        var forceOption = new Option<bool>("--force", "Force rebuild without confirmation");
         buildCommand.AddArgument(buildPathArgument);
+        buildCommand.AddOption(forceOption);
 
         buildCommand.SetHandler(async (context) =>
         {
             var path = context.ParseResult.GetValueForArgument(buildPathArgument) ?? Directory.GetCurrentDirectory();
-            await BuildIndexAsync(path, loggerFactory);
+            var force = context.ParseResult.GetValueForOption(forceOption);
+            await BuildIndexAsync(path, loggerFactory, force);
         });
 
         // Monitor command
@@ -56,12 +59,15 @@ class Program
         {
             Arity = ArgumentArity.ZeroOrOne
         };
+        var fullForceOption = new Option<bool>("--force", "Force rebuild without confirmation");
         fullCommand.AddArgument(fullPathArgument);
+        fullCommand.AddOption(fullForceOption);
 
         fullCommand.SetHandler(async (context) =>
         {
             var path = context.ParseResult.GetValueForArgument(fullPathArgument) ?? Directory.GetCurrentDirectory();
-            await FullIndexAsync(path, loggerFactory);
+            var force = context.ParseResult.GetValueForOption(fullForceOption);
+            await FullIndexAsync(path, loggerFactory, force);
         });
 
         // Search command
@@ -95,7 +101,91 @@ class Program
         return await rootCommand.InvokeAsync(args);
     }
 
-    private static async Task BuildIndexAsync(string path, ILoggerFactory loggerFactory)
+    
+
+    private static bool ConfirmDatabaseOverwrite(string dbPath, bool force, ILogger logger)
+    {
+        if (!File.Exists(dbPath))
+        {
+            return true; // No existing database, proceed
+        }
+
+        if (force)
+        {
+            logger.LogInformation("Force flag enabled, removing existing database...");
+            try
+            {
+                File.Delete(dbPath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to delete existing database: {DbPath}", dbPath);
+                return false;
+            }
+        }
+
+        // Get database info for display
+        var dbInfo = new FileInfo(dbPath);
+        var dbSizeMB = dbInfo.Length / 1024.0 / 1024.0;
+        
+        Console.WriteLine();
+        Console.WriteLine("+======================================================================+");
+        Console.WriteLine("|                          DATABASE EXISTS                            |");
+        Console.WriteLine("+======================================================================+");
+        Console.WriteLine($"| Path: {dbPath.PadRight(58)} |");
+        Console.WriteLine($"| Size: {dbSizeMB:F2} MB".PadRight(71) + "|");
+        Console.WriteLine($"| Modified: {dbInfo.LastWriteTime:yyyy-MM-dd HH:mm:ss}".PadRight(71) + "|");
+        Console.WriteLine("+======================================================================+");
+        Console.WriteLine("| Building a new index will DELETE the existing database and all its  |");
+        Console.WriteLine("| indexed data. This operation cannot be undone.                      |");
+        Console.WriteLine("+======================================================================+");
+        Console.WriteLine();
+        Console.Write("Do you want to proceed and rebuild the index? (y/N): ");
+        
+        var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+        
+        if (response == "y" || response == "yes")
+        {
+            logger.LogInformation("User confirmed database rebuild, removing existing database...");
+            try
+            {
+                File.Delete(dbPath);
+                Console.WriteLine("[OK] Existing database removed successfully.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to delete existing database: {DbPath}", dbPath);
+                Console.WriteLine("[ERROR] Failed to remove existing database. Check file permissions.");
+                return false;
+            }
+        }
+        else
+        {
+            logger.LogInformation("Index build cancelled by user.");
+            Console.WriteLine("Index build cancelled.");
+            return false;
+        }
+    }
+
+    private static string GetDatabasePath()
+    {
+        // First check environment variable (set by backend)
+        var envDbPath = Environment.GetEnvironmentVariable("INDEXER_DB_PATH");
+        if (!string.IsNullOrEmpty(envDbPath))
+        {
+            Console.WriteLine($"Using database path from environment: {envDbPath}");
+            return envDbPath;
+        }
+
+        // Fall back to default path
+        var defaultPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "index.db");
+        Console.WriteLine($"Using default database path: {defaultPath}");
+        return defaultPath;
+    }
+
+    private static async Task BuildIndexAsync(string path, ILoggerFactory loggerFactory, bool force = false)
     {
         var logger = loggerFactory.CreateLogger("BuildIndex");
         var dbLogger = loggerFactory.CreateLogger<IndexDatabase>();
@@ -106,8 +196,13 @@ class Program
 
         try
         {
-            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "index.db");
+            var dbPath = GetDatabasePath();
             
+            if (!ConfirmDatabaseOverwrite(dbPath, force, logger))
+            {
+                return;
+            }
+
             using var database = new IndexDatabase(dbPath, dbLogger);
             var mimeTypeHelper = new MimeTypeHelper(mimeLogger);
             var indexer = new FileIndexer(database, indexerLogger, mimeTypeHelper, path, useRelativePaths: true);
@@ -146,7 +241,7 @@ class Program
 
         try
         {
-            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "index.db");
+            var dbPath = GetDatabasePath();
             
             using var database = new IndexDatabase(dbPath, dbLogger);
             var mimeTypeHelper = new MimeTypeHelper(mimeLogger);
@@ -176,14 +271,14 @@ class Program
         }
     }
 
-    private static async Task FullIndexAsync(string path, ILoggerFactory loggerFactory)
+    private static async Task FullIndexAsync(string path, ILoggerFactory loggerFactory, bool force = false)
     {
         var logger = loggerFactory.CreateLogger("FullIndex");
         
         logger.LogInformation("Starting full indexing (build + monitor) for: {Path}", path);
 
         // First build the index
-        await BuildIndexAsync(path, loggerFactory);
+        await BuildIndexAsync(path, loggerFactory, force);
 
         // Then start monitoring
         await MonitorAsync(path, loggerFactory);
@@ -196,7 +291,7 @@ class Program
 
         try
         {
-            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "index.db");
+            var dbPath = GetDatabasePath();
             
             using var database = new IndexDatabase(dbPath, dbLogger);
             var results = database.SearchFiles(term, limit);
@@ -228,7 +323,7 @@ class Program
 
         try
         {
-            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "index.db");
+            var dbPath = GetDatabasePath();
             
             if (!File.Exists(dbPath))
             {

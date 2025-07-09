@@ -101,6 +101,44 @@ public class FileIndexer
         }
     }
 
+    public async Task UpdateDirectoryEntryAsync(string directoryPath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var entries = new List<FileEntry>();
+            var dirInfo = new DirectoryInfo(directoryPath);
+            
+            if (!dirInfo.Exists)
+            {
+                // Directory doesn't exist, delete from index
+                var pathToDelete = _useRelativePaths ? GetRelativePath(directoryPath) : directoryPath;
+                _database.DeleteEntriesWithPrefix(pathToDelete);
+                _logger.LogDebug("Deleted non-existent directory from index: {Path}", pathToDelete);
+                return;
+            }
+
+            // Add the directory entry itself
+            var dirEntry = await CreateFileEntryAsync(dirInfo, cancellationToken);
+            entries.Add(dirEntry);
+            UpdateProgress();
+
+            // Process all contents recursively
+            await ProcessDirectoryAsync(directoryPath, entries, cancellationToken);
+
+            // Save all entries
+            if (entries.Count > 0)
+            {
+                _database.InsertFileEntries(entries);
+            }
+            
+            _logger.LogDebug("Updated directory entry and its contents: {Path}", directoryPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating directory entry: {Path}", directoryPath);
+        }
+    }
+
     public void DeleteFileEntry(string filePath)
     {
         try
@@ -127,6 +165,45 @@ public class FileIndexer
         {
             _logger.LogError(ex, "Error deleting directory entries: {Path}", directoryPath);
         }
+    }
+
+    private async Task<FileEntry> CreateFileEntryAsync(FileSystemInfo fsInfo, CancellationToken cancellationToken)
+    {
+        var entry = new FileEntry
+        {
+            FileName = fsInfo.Name,
+            Extension = Path.GetExtension(fsInfo.Name).ToLowerInvariant(),
+            CreationTime = fsInfo.CreationTime,
+            LastWriteTime = fsInfo.LastWriteTime,
+            LastAccessTime = fsInfo.LastAccessTime,
+            IsDirectory = fsInfo is DirectoryInfo,
+            Attributes = fsInfo.Attributes,
+            IndexedTime = DateTime.Now
+        };
+
+        if (_useRelativePaths)
+        {
+            entry.FullPath = GetRelativePath(fsInfo.FullName);
+            entry.ParentPath = GetRelativePath(Path.GetDirectoryName(fsInfo.FullName));
+        }
+        else
+        {
+            entry.FullPath = fsInfo.FullName;
+            entry.ParentPath = Path.GetDirectoryName(fsInfo.FullName);
+        }
+
+        if (fsInfo is FileInfo fileInfo)
+        {
+            entry.Size = fileInfo.Length;
+            entry.MimeType = await _mimeTypeHelper.GetMimeTypeAsync(fileInfo.FullName, cancellationToken);
+        }
+        else
+        {
+            entry.Size = 0;
+            entry.MimeType = "inode/directory";
+        }
+
+        return entry;
     }
 
     private async Task ProcessDirectoryAsync(string path, List<FileEntry> entries, CancellationToken cancellationToken)
@@ -173,45 +250,6 @@ public class FileIndexer
         {
             _logger.LogError(ex, "Error processing directory: {Path}", path);
         }
-    }
-
-    private async Task<FileEntry> CreateFileEntryAsync(FileSystemInfo fsInfo, CancellationToken cancellationToken)
-    {
-        var entry = new FileEntry
-        {
-            FileName = fsInfo.Name,
-            Extension = Path.GetExtension(fsInfo.Name).ToLowerInvariant(),
-            CreationTime = fsInfo.CreationTime,
-            LastWriteTime = fsInfo.LastWriteTime,
-            LastAccessTime = fsInfo.LastAccessTime,
-            IsDirectory = fsInfo is DirectoryInfo,
-            Attributes = fsInfo.Attributes,
-            IndexedTime = DateTime.Now
-        };
-
-        if (_useRelativePaths)
-        {
-            entry.FullPath = GetRelativePath(fsInfo.FullName);
-            entry.ParentPath = GetRelativePath(Path.GetDirectoryName(fsInfo.FullName));
-        }
-        else
-        {
-            entry.FullPath = fsInfo.FullName;
-            entry.ParentPath = Path.GetDirectoryName(fsInfo.FullName);
-        }
-
-        if (fsInfo is FileInfo fileInfo)
-        {
-            entry.Size = fileInfo.Length;
-            entry.MimeType = await _mimeTypeHelper.GetMimeTypeAsync(fileInfo.FullName, cancellationToken);
-        }
-        else
-        {
-            entry.Size = 0;
-            entry.MimeType = "inode/directory";
-        }
-
-        return entry;
     }
 
     private string GetRelativePath(string? absolutePath)

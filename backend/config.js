@@ -33,6 +33,8 @@ const config = {
   // Maximum file size for content display (default: 5GB)
   contentMaxSize: process.env.CONTENT_MAX_SIZE || 5 * 1024 * 1024 * 1024, // 5GB
 
+
+
   // *** Logging options
   // **************************************************
   // Directory for storing log files
@@ -57,6 +59,7 @@ const config = {
   maxLogFileSize: parseInt(process.env.MAX_LOG_FILE_SIZE) || 10,
   // Number of log files to keep (default: 7)
   logFilesToKeep: parseInt(process.env.LOG_FILES_TO_KEEP) || 7,
+
 
 
   // *** Image related options
@@ -127,9 +130,30 @@ const config = {
 
 
 
+  // *** C# Indexer Integration
+  // **************************************************
+  // Use C# indexer instead of Node.js indexer and watcher (takes over both indexing and file watching)
+  useCSharpIndexer: process.env.USE_CSHARP_INDEXER === 'true' || false,
+  // Path to the C# indexer executable
+  cSharpIndexerPath: process.env.CSHARP_INDEXER_PATH || path.join(__dirname, '../Indexer/bin/Release/net8.0/NtfsIndexer.exe'),
+  // Whether to force rebuild the C# index on startup
+  // cSharpIndexerForceRebuild: process.env.CSHARP_INDEXER_FORCE_REBUILD === 'true' || false,
+  // TODO: Now we can't get user input, so we force rebuild the C# index on startupn
+  cSharpIndexerForceRebuild: true,
+  // Timeout in seconds to wait for C# indexer startup (0 = no timeout)
+  cSharpIndexerStartupTimeout: parseInt(process.env.CSHARP_INDEXER_STARTUP_TIMEOUT) || 30,
+  // Whether to automatically restart C# indexer if it crashes
+  cSharpIndexerAutoRestart: process.env.CSHARP_INDEXER_AUTO_RESTART !== 'false', // default true
+  // Maximum number of restart attempts
+  cSharpIndexerMaxRestarts: parseInt(process.env.CSHARP_INDEXER_MAX_RESTARTS) || 3,
+  // Restart delay in seconds
+  cSharpIndexerRestartDelay: parseInt(process.env.CSHARP_INDEXER_RESTART_DELAY) || 5,
+
+
+
   // *** File watcher options
   // **************************************************
-  // Enable real-time file system monitoring
+  // Enable real-time file system monitoring (ignored if useCSharpIndexer is true)
   useFileWatcher: process.env.USE_FILE_WATCHER === 'true' || false,
   // useFileWatcher: true,
   // Watch depth: 0 = only base directory, 1 = base + one level, etc., -1 = all subdirectories (may impact performance)

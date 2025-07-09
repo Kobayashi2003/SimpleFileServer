@@ -138,8 +138,17 @@ public class IndexDatabase : IDisposable
     public void DeleteEntriesWithPrefix(string pathPrefix)
     {
         using var command = _connection.CreateCommand();
-        command.CommandText = "DELETE FROM files WHERE path LIKE @prefix";
-        command.Parameters.AddWithValue("@prefix", $"{pathPrefix}%");
+        
+        string normalizedPrefix = pathPrefix;
+        if (!normalizedPrefix.EndsWith("/") && !normalizedPrefix.EndsWith("\\"))
+        {
+            normalizedPrefix += "/";
+        }
+        
+        command.CommandText = "DELETE FROM files WHERE path = @exactPath OR path LIKE @prefix";
+        command.Parameters.AddWithValue("@exactPath", pathPrefix); // Delete the directory itself
+        command.Parameters.AddWithValue("@prefix", $"{normalizedPrefix}%"); // Delete all contents
+        
         var rowsAffected = command.ExecuteNonQuery();
         
         if (rowsAffected > 0)

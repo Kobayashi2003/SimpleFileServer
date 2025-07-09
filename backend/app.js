@@ -15,6 +15,8 @@ const multer = require('multer')
 const indexer = require('./indexer');
 // watcher
 const watcher = require('./watcher');
+// C# indexer manager
+const csharpIndexer = require('./csharp-indexer');
 // auth
 const { authMiddleware, writePermissionMiddleware, createSession, getSession, deleteSession } = require('./auth');
 // logger
@@ -271,8 +273,61 @@ app.get('/api/bgs', async (req, res) => {
 
 app.use(authMiddleware);
 
-if (config.useFileIndex) {
-  console.log('Initializing file indexer...');
+// Initialize indexing and monitoring systems
+if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
+  console.log('Using C# indexer for file indexing and monitoring...');
+  
+  // Start C# indexer
+  csharpIndexer.start()
+    .then(success => {
+      if (success) {
+        console.log('C# indexer started successfully');
+        console.log('Node.js indexer and watcher are disabled in favor of C# indexer');
+      } else {
+        console.error('Failed to start C# indexer, falling back to Node.js indexer');
+        initializeNodeIndexer();
+      }
+    })
+    .catch(error => {
+      console.error('Error starting C# indexer:', error.message);
+      console.log('Falling back to Node.js indexer');
+      initializeNodeIndexer();
+    });
+
+  // Handle graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('Received SIGTERM, shutting down C# indexer...');
+    await csharpIndexer.stop();
+    process.exit(0);
+  });
+
+  process.on('SIGINT', async () => {
+    console.log('Received SIGINT, shutting down C# indexer...');
+    await csharpIndexer.stop();
+    process.exit(0);
+  });
+
+} else if (config.useFileIndex) {
+  console.log('Using Node.js indexer...');
+  initializeNodeIndexer();
+} else {
+  console.log('File indexing is disabled');
+}
+
+// Initialize Node.js file watcher if not using C# indexer
+if (!config.useCSharpIndexer && config.useFileWatcher) {
+  console.log('Initializing Node.js file watcher...');
+  try {
+    watcher.initialize() && watcher.startWatching(config.baseDirectory);
+  } catch (error) {
+    console.error('Error initializing file watcher:', error);
+  } finally {
+    console.log('File watcher initialized');
+  }
+}
+
+function initializeNodeIndexer() {
+  console.log('Initializing Node.js file indexer...');
   indexer.initializeDatabase();
 
   if (config.rebuildIndexOnStartup || !indexer.isIndexBuilt()) {
@@ -297,16 +352,17 @@ if (config.useFileIndex) {
     const stats = indexer.getIndexStats();
     console.log(`Using existing file index with ${stats.fileCount} files, last built on ${stats.lastBuilt}`);
   }
-}
 
-if (config.useFileWatcher) {
-  console.log('Initializing file watcher...');
-  try {
-    watcher.initialize() && watcher.startWatching(config.baseDirectory);
-  } catch (error) {
-    console.error('Error initializing file watcher:', error);
-  } finally {
-    console.log('File watcher initialized');
+  // Initialize Node.js file watcher
+  if (config.useFileWatcher) {
+    console.log('Initializing Node.js file watcher...');
+    try {
+      watcher.initialize() && watcher.startWatching(config.baseDirectory);
+    } catch (error) {
+      console.error('Error initializing file watcher:', error);
+    } finally {
+      console.log('File watcher initialized');
+    }
   }
 }
 
@@ -2113,71 +2169,166 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
 
 
 app.get('/api/index-status', (req, res) => {
-  if (!config.useFileIndex) {
+  if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
+    const status = csharpIndexer.getStatus();
+    return res.json({
+      enabled: true,
+      type: 'csharp',
+      isRunning: status.isRunning,
+      processId: status.processId,
+      restartCount: status.restartCount,
+      executablePath: status.executablePath,
+      baseDirectory: status.baseDirectory,
+      databasePath: status.databasePath
+    });
+  } else if (config.useFileIndex) {
+    const stats = indexer.getIndexStats();
+    return res.json({
+      enabled: true,
+      type: 'nodejs',
+      ...stats
+    });
+  } else {
     return res.json({ enabled: false });
   }
-
-  const stats = indexer.getIndexStats();
-  res.json({
-    enabled: true,
-    ...stats
-  });
 });
 
-app.post('/api/rebuild-index', writePermissionMiddleware, (req, res) => {
-  if (!config.useFileIndex) {
+app.post('/api/rebuild-index', writePermissionMiddleware, async (req, res) => {
+  if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
+    try {
+      const success = await csharpIndexer.restart();
+      if (success) {
+        return res.json({ message: "C# indexer restarted successfully", type: 'csharp' });
+      } else {
+        return res.status(500).json({ error: "Failed to restart C# indexer" });
+      }
+    } catch (error) {
+      return res.status(500).json({ error: `Error restarting C# indexer: ${error.message}` });
+    }
+  } else if (config.useFileIndex) {
+    const stats = indexer.getIndexStats();
+    if (stats.isBuilding) {
+      return res.status(409).json({ error: "Index is already being built", progress: stats.progress });
+    }
+
+    // Start rebuilding index in background
+    indexer.buildIndex(config.baseDirectory)
+      .then(result => {
+        console.log(result.success ? 'Index rebuilt successfully' : 'Failed to rebuild index');
+      })
+      .catch(error => {
+        console.error('Error rebuilding index:', error);
+      });
+
+    res.json({ message: "Index rebuild started", progress: indexer.getIndexStats().progress, type: 'nodejs' });
+  } else {
     return res.status(400).json({ error: "File indexing is not enabled" });
   }
-
-  const stats = indexer.getIndexStats();
-  if (stats.isBuilding) {
-    return res.status(409).json({ error: "Index is already being built", progress: stats.progress });
-  }
-
-  // Start rebuilding index in background
-  indexer.buildIndex(config.baseDirectory)
-    .then(result => {
-      console.log(result.success ? 'Index rebuilt successfully' : 'Failed to rebuild index');
-    })
-    .catch(error => {
-      console.error('Error rebuilding index:', error);
-    });
-
-  res.json({ message: "Index rebuild started", progress: indexer.getIndexStats().progress });
 });
 
 app.get('/api/watcher-status', (req, res) => {
-  if (!config.useFileWatcher) {
+  if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
+    const status = csharpIndexer.getStatus();
+    return res.json({
+      enabled: true,
+      type: 'csharp',
+      active: status.isRunning,
+      processId: status.processId,
+      restartCount: status.restartCount
+    });
+  } else if (config.useFileWatcher) {
+    const status = watcher.getStatus();
+    return res.json({
+      enabled: true,
+      type: 'nodejs',
+      ...status
+    });
+  } else {
     return res.json({ enabled: false });
   }
+});
 
-  const status = watcher.getStatus();
-  res.json({
+app.post('/api/toggle-watcher', writePermissionMiddleware, async (req, res) => {
+  if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
+    try {
+      const status = csharpIndexer.getStatus();
+      
+      if (status.isRunning) {
+        await csharpIndexer.stop();
+        return res.json({ message: "C# indexer stopped", active: false, type: 'csharp' });
+      } else {
+        const success = await csharpIndexer.start();
+        return res.json({
+          message: success ? "C# indexer started" : "Failed to start C# indexer",
+          active: success,
+          type: 'csharp'
+        });
+      }
+    } catch (error) {
+      return res.status(500).json({ error: `Error toggling C# indexer: ${error.message}` });
+    }
+  } else if (config.useFileWatcher) {
+    const status = watcher.getStatus();
+
+    if (status.active) {
+      watcher.stopWatching();
+      return res.json({ message: "File watcher stopped", active: false, type: 'nodejs' });
+    } else {
+      const started = watcher.startWatching(config.baseDirectory);
+      return res.json({
+        message: started ? "File watcher started" : "Failed to start file watcher",
+        active: started,
+        type: 'nodejs'
+      });
+    }
+  } else {
+    return res.status(400).json({ error: "File watching is not enabled in config" });
+  }
+});
+
+app.get('/api/csharp-indexer-status', (req, res) => {
+  if (!config.useCSharpIndexer) {
+    return res.json({ enabled: false, reason: 'C# indexer is disabled in configuration' });
+  }
+
+  if (!csharpIndexer.isAvailable()) {
+    return res.json({ 
+      enabled: false, 
+      reason: 'C# indexer executable not found',
+      executablePath: config.cSharpIndexerPath
+    });
+  }
+
+  const status = csharpIndexer.getStatus();
+  return res.json({
     enabled: true,
-    ...status
+    ...status,
+    configuration: {
+      forceRebuild: config.cSharpIndexerForceRebuild,
+      startupTimeout: config.cSharpIndexerStartupTimeout,
+      autoRestart: config.cSharpIndexerAutoRestart,
+      maxRestarts: config.cSharpIndexerMaxRestarts,
+      restartDelay: config.cSharpIndexerRestartDelay
+    }
   });
 });
 
-app.post('/api/toggle-watcher', writePermissionMiddleware, (req, res) => {
-  if (!config.useFileWatcher) {
-    return res.status(400).json({ error: "File watching is not enabled in config" });
+app.post('/api/csharp-indexer/restart', writePermissionMiddleware, async (req, res) => {
+  if (!config.useCSharpIndexer || !csharpIndexer.isAvailable()) {
+    return res.status(400).json({ error: "C# indexer is not enabled or available" });
   }
 
-  const status = watcher.getStatus();
-
-  if (status.active) {
-    watcher.stopWatching();
-    return res.json({ message: "File watcher stopped", active: false });
-  } else {
-    const started = watcher.startWatching(config.baseDirectory);
-    return res.json({
-      message: started ? "File watcher started" : "Failed to start file watcher",
-      active: started
+  try {
+    const success = await csharpIndexer.restart();
+    res.json({ 
+      success, 
+      message: success ? "C# indexer restarted successfully" : "Failed to restart C# indexer",
+      status: csharpIndexer.getStatus()
     });
+  } catch (error) {
+    res.status(500).json({ error: `Error restarting C# indexer: ${error.message}` });
   }
 });
-
-
 
 function handleMediaFilesRequest(req, res, mediaType, isRecursive, dir, page, limit, sortBy, sortOrder) {
   const basePath = path.resolve(config.baseDirectory);
