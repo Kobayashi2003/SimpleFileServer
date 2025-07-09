@@ -4,6 +4,7 @@ const os = require('os');
 const fs = require('fs')
 const path = require('path')
 const cors = require('cors')
+const cookieParser = require('cookie-parser');
 const utils = require('./utils');
 // handle zip and rar files
 const AdmZip = require('adm-zip')
@@ -15,7 +16,9 @@ const indexer = require('./indexer');
 // watcher
 const watcher = require('./watcher');
 // auth
-const { authMiddleware, writePermissionMiddleware } = require('./auth');
+const { authMiddleware, writePermissionMiddleware, createSession, getSession, deleteSession } = require('./auth');
+// logger
+const { apiLoggingMiddleware } = require('./logger');
 // worker threads
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 // For PSD file processing
@@ -31,12 +34,114 @@ const PORT = config.port;
 
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
+
+app.use(apiLoggingMiddleware);
 
 app.get('/api/version', (req, res) => {
   res.json({
     version: '1.0.0',
     username: req.user?.username,
     permissions: req.user?.permissions || 'none'
+  });
+});
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' });
+  }
+  
+  // Import validateUser from auth.js
+  const { validateUser } = require('./auth');
+  
+  const userStatus = validateUser(username, password);
+  
+  if (!userStatus.isAuthenticated) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+  
+  // Create session and set cookie
+  const sessionId = createSession(userStatus.username, userStatus.permissions);
+  
+  // Set HTTP-only cookie
+  res.cookie('sessionId', sessionId, {
+    httpOnly: true,        // prevent XSS attacks
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    sameSite: 'strict',    // prevent CSRF attacks
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  });
+  
+  res.json({
+    success: true,
+    username: userStatus.username,
+    permissions: userStatus.permissions
+  });
+});
+
+app.post('/api/logout', (req, res) => {
+  // Delete session if exists
+  const sessionId = req.cookies.sessionId;
+  if (sessionId) {
+    deleteSession(sessionId);
+  }
+  
+  // Clear cookie
+  res.clearCookie('sessionId');
+  
+  res.json({ success: true, message: 'Logged out successfully' });
+});
+
+app.get('/api/validate-session', (req, res) => {
+  // If userRules is not configured, authentication is disabled
+  if (!config.userRules || config.userRules.length === 0) {
+    return res.json({
+      isAuthenticated: true,
+      username: null,
+      permissions: 'rw'
+    });
+  }
+
+  // Check session cookie first
+  const sessionId = req.cookies.sessionId;
+  if (sessionId) {
+    const session = getSession(sessionId);
+    if (session) {
+      return res.json({
+        isAuthenticated: true,
+        username: session.username,
+        permissions: session.permissions
+      });
+    }
+  }
+
+  // Check Basic Auth if no valid session
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Basic ')) {
+    try {
+      const base64Credentials = authHeader.split(' ')[1];
+      const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
+      const [username, password] = credentials.split(':');
+      
+      const userStatus = validateUser(username, password);
+      if (userStatus.isAuthenticated) {
+        return res.json({
+          isAuthenticated: true,
+          username: userStatus.username,
+          permissions: userStatus.permissions
+        });
+      }
+    } catch (error) {
+      // Invalid auth header, continue to return unauthenticated
+    }
+  }
+
+  // Return unauthenticated status without triggering browser auth popup
+  return res.json({
+    isAuthenticated: false,
+    username: null,
+    permissions: null
   });
 });
 
@@ -164,15 +269,6 @@ app.get('/api/bgs', async (req, res) => {
   }
 })
 
-app.get('/api/validate-token', (req, res) => {
-  res.json({
-    isAuthenticated: true,
-    username: req.user?.username,
-    permissions: req.user?.permissions || 'none'
-  });
-});
-
-// Apply authentication middleware to all other routes
 app.use(authMiddleware);
 
 if (config.useFileIndex) {
@@ -485,102 +581,8 @@ app.get('/api/search', (req, res) => {
 });
 
 app.get('/api/images', (req, res) => {
-  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc', recursive = 'false' } = req.query;
-  const basePath = path.resolve(config.baseDirectory);
-  const searchPath = path.join(basePath, dir);
-
-  if (!searchPath.startsWith(basePath)) {
-    return res.status(403).json({ error: "Access denied" });
-  }
-
-  try {
-    const isRecursive = recursive === 'true';
-
-    // Use file index if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
-      const imagesResult = indexer.findImagesInIndex(dir, page, limit, sortBy, sortOrder, isRecursive);
-      return res.json(imagesResult);
-    }
-
-    // Otherwise, use real-time search
-    if (isRecursive) {
-      // Use existing recursive search
-      parallelFindImages(searchPath, basePath)
-        .then(images => {
-          // Sort images before pagination
-          if (sortBy === 'name') {
-            images = sortFiles(images, 'path', sortOrder);
-          }
-          else {
-            images = sortFiles(images, sortBy, sortOrder);
-          }
-
-          // Apply pagination if specified
-          let hasMore = false;
-          let total = images.length;
-          let paginatedImages = images;
-
-          if (page !== undefined) {
-            const pageNum = parseInt(page) || 1;
-            const limitNum = parseInt(limit) || 100;
-            const startIndex = (pageNum - 1) * limitNum;
-            const endIndex = startIndex + limitNum;
-
-            hasMore = endIndex < total;
-            paginatedImages = images.slice(startIndex, endIndex);
-          }
-
-          // Format response to match the structure of paginated results
-          res.json({
-            images: paginatedImages,
-            total: total,
-            hasMore: hasMore
-          });
-        })
-        .catch(error => {
-          res.status(500).json({ error: error.message });
-        });
-    } else {
-      // Non-recursive search - only find images in the current directory
-      findImagesInDirectory(searchPath, basePath)
-        .then(images => {
-          // Sort images before pagination
-          if (sortBy === 'name') {
-            images = sortFiles(images, 'path', sortOrder);
-          }
-          else {
-            images = sortFiles(images, sortBy, sortOrder);
-          }
-
-          // Apply pagination if specified
-          let hasMore = false;
-          let total = images.length;
-          let paginatedImages = images;
-
-          if (page !== undefined) {
-            const pageNum = parseInt(page) || 1;
-            const limitNum = parseInt(limit) || 100;
-            const startIndex = (pageNum - 1) * limitNum;
-            const endIndex = startIndex + limitNum;
-
-            hasMore = endIndex < total;
-            paginatedImages = images.slice(startIndex, endIndex);
-          }
-
-          // Format response to match the structure of paginated results
-          res.json({
-            images: paginatedImages,
-            total: total,
-            hasMore: hasMore
-          });
-        })
-        .catch(error => {
-          res.status(500).json({ error: error.message });
-        });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc', recursive = 'true' } = req.query;
+  handleMediaFilesRequest(req, res, 'image', recursive === 'true', dir, page, limit, sortBy, sortOrder);
 });
 
 app.get('/api/images/random', (req, res) => {
@@ -606,46 +608,8 @@ app.get('/api/images/random', (req, res) => {
 })
 
 app.get('/api/audios', (req, res) => {
-  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc' } = req.query;
-  const basePath = path.resolve(config.baseDirectory);
-  const searchPath = path.join(basePath, dir);
-
-  if (!searchPath.startsWith(basePath)) {
-    return res.status(403).json({ error: "Access denied" });
-  }
-
-  try {
-    findAudiosInDirectory(searchPath, basePath)
-      .then(audios => {
-        audios = sortFiles(audios, sortBy, sortOrder);
-
-        let hasMore = false;
-        let total = audios.length;
-        let paginatedAudios = audios;
-
-        if (page !== undefined) {
-          const pageNum = parseInt(page) || 1;
-          const limitNum = parseInt(limit) || 100;
-          const startIndex = (pageNum - 1) * limitNum;
-          const endIndex = startIndex + limitNum;
-
-          hasMore = endIndex < total;
-          paginatedAudios = audios.slice(startIndex, endIndex);
-        }
-
-        res.json({
-          audios: paginatedAudios,
-          total: total,
-          hasMore: hasMore
-        });
-      })
-      .catch(error => {
-        res.status(500).json({ error: error.message });
-      });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-
+  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc', recursive = 'false' } = req.query;
+  handleMediaFilesRequest(req, res, 'audio', recursive === 'true', dir, page, limit, sortBy, sortOrder);
 })
 
 app.get('/api/audios/random', (req, res) => {
@@ -654,8 +618,11 @@ app.get('/api/audios/random', (req, res) => {
   const searchPath = path.join(basePath, dir);
 
   try {
-    findAudiosInDirectory(searchPath, basePath)
+    findMediaFilesInDirectory(searchPath, basePath, 'audio')
       .then(audios => {
+        if (audios.length === 0) {
+          return res.status(404).json({ error: "No audios found" });
+        }
         const randomAudio = audios[Math.floor(Math.random() * audios.length)];
         res.json({ audio: randomAudio });
       })
@@ -668,45 +635,8 @@ app.get('/api/audios/random', (req, res) => {
 })
 
 app.get('/api/videos', (req, res) => {
-  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc' } = req.query;
-  const basePath = path.resolve(config.baseDirectory);
-  const searchPath = path.join(basePath, dir);
-
-  if (!searchPath.startsWith(basePath)) {
-    return res.status(403).json({ error: "Access denied" });
-  }
-
-  try {
-    findVideosInDirectory(searchPath, basePath)
-      .then(videos => {
-        videos = sortFiles(videos, sortBy, sortOrder);
-
-        let hasMore = false;
-        let total = videos.length;
-        let paginatedVideos = videos;
-
-        if (page !== undefined) {
-          const pageNum = parseInt(page) || 1;
-          const limitNum = parseInt(limit) || 100;
-          const startIndex = (pageNum - 1) * limitNum;
-          const endIndex = startIndex + limitNum;
-
-          hasMore = endIndex < total;
-          paginatedVideos = videos.slice(startIndex, endIndex);
-        }
-
-        res.json({
-          videos: paginatedVideos,
-          total: total,
-          hasMore: hasMore
-        });
-      })
-      .catch(error => {
-        res.status(500).json({ error: error.message });
-      });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  const { dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc', recursive = 'false' } = req.query;
+  handleMediaFilesRequest(req, res, 'video', recursive === 'true', dir, page, limit, sortBy, sortOrder);
 })
 
 app.get('/api/videos/random', (req, res) => {
@@ -715,8 +645,11 @@ app.get('/api/videos/random', (req, res) => {
   const searchPath = path.join(basePath, dir);
 
   try {
-    findVideosInDirectory(searchPath, basePath)
+    findMediaFilesInDirectory(searchPath, basePath, 'video')
       .then(videos => {
+        if (videos.length === 0) {
+          return res.status(404).json({ error: "No videos found" });
+        }
         const randomVideo = videos[Math.floor(Math.random() * videos.length)];
         res.json({ video: randomVideo });
       })
@@ -1307,7 +1240,6 @@ app.get('/api/thumbnail', async (req, res) => {
 app.get('/api/comic', async (req, res) => {
   try {
     const filePath = req.query.path;
-    const token = req.query.token;
     if (!filePath) {
       return res.status(400).json({ error: 'No file path provided' });
     }
@@ -1380,8 +1312,8 @@ app.get('/api/comic', async (req, res) => {
             continue;
           }
 
-          // Create a direct raw URL for the image - don't use relative path since it's a temp file
-          pages.push(`/api/raw?path=${encodeURIComponent(entryPath)}${token ? `&token=${token}` : ''}`);
+          // Create a direct raw URL for the image
+          pages.push(`/api/raw?path=${encodeURIComponent(entryPath)}`);
         }
       } catch (error) {
         return res.status(500).json({ error: 'Failed to extract CBZ file' });
@@ -1459,8 +1391,8 @@ app.get('/api/comic', async (req, res) => {
           // Write the file
           fs.writeFileSync(entryPath, file.extraction);
 
-          // Create a direct raw URL for the image - don't use relative path since it's a temp file
-          pages.push(`/api/raw?path=${encodeURIComponent(entryPath)}${token ? `&token=${token}` : ''}`);
+          // Create a direct raw URL for the image
+          pages.push(`/api/raw?path=${encodeURIComponent(entryPath)}`);
         }
       } catch (error) {
         return res.status(500).json({ error: 'Failed to extract CBR file' });
@@ -2246,6 +2178,109 @@ app.post('/api/toggle-watcher', writePermissionMiddleware, (req, res) => {
 });
 
 
+
+function handleMediaFilesRequest(req, res, mediaType, isRecursive, dir, page, limit, sortBy, sortOrder) {
+  const basePath = path.resolve(config.baseDirectory);
+  const searchPath = path.join(basePath, dir);
+
+  if (!searchPath.startsWith(basePath)) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  try {
+    // Use file index if enabled
+    if (config.useFileIndex && indexer.isIndexBuilt()) {
+      // For images, use the existing method
+      if (mediaType === 'image') {
+        const mediaResult = indexer.findImagesInIndex(dir, page, limit, sortBy, sortOrder, isRecursive);
+        return res.json(mediaResult);
+      }
+      // For other media types, fall back to real-time search since indexer doesn't have specific methods
+    }
+
+    // Otherwise, use real-time search
+    if (isRecursive) {
+      // Use parallel search for recursive
+      parallelFindMedia(searchPath, basePath, mediaType)
+        .then(mediaFiles => {
+          // Sort media files before pagination
+          if (sortBy === 'name') {
+            mediaFiles = sortFiles(mediaFiles, 'path', sortOrder);
+          } else {
+            mediaFiles = sortFiles(mediaFiles, sortBy, sortOrder);
+          }
+
+          // Apply pagination if specified
+          const result = applyPagination(mediaFiles, page, limit);
+
+          // Format response to match the structure of paginated results
+          const responseKey = mediaType + 's';
+          const response = {
+            [responseKey]: result.paginatedItems,
+            total: result.total,
+            hasMore: result.hasMore
+          };
+
+          res.json(response);
+        })
+        .catch(error => {
+          res.status(500).json({ error: error.message });
+        });
+    } else {
+      // Non-recursive search - only find media in the current directory
+      findMediaFilesInDirectory(searchPath, basePath, mediaType)
+        .then(mediaFiles => {
+          // Sort media files before pagination
+          if (sortBy === 'name') {
+            mediaFiles = sortFiles(mediaFiles, 'path', sortOrder);
+          } else {
+            mediaFiles = sortFiles(mediaFiles, sortBy, sortOrder);
+          }
+
+          // Apply pagination if specified
+          const result = applyPagination(mediaFiles, page, limit);
+
+          // Format response to match the structure of paginated results
+          const responseKey = mediaType + 's';
+          const response = {
+            [responseKey]: result.paginatedItems,
+            total: result.total,
+            hasMore: result.hasMore
+          };
+
+          res.json(response);
+        })
+        .catch(error => {
+          res.status(500).json({ error: error.message });
+        });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+function applyPagination(items, page, limit) {
+  const total = items.length;
+  let hasMore = false;
+  let paginatedItems = items;
+
+  if (page !== undefined) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 100;
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = startIndex + limitNum;
+
+    hasMore = endIndex < total;
+    paginatedItems = items.slice(startIndex, endIndex);
+  }
+
+  return {
+    paginatedItems,
+    total,
+    hasMore
+  };
+}
+
 async function searchFiles(dir, query, basePath) {
   let results = [];
 
@@ -2284,6 +2319,10 @@ async function searchFiles(dir, query, basePath) {
 }
 
 async function findAllImages(dir, basePath) {
+  return await findAllMediaFiles(dir, basePath, 'image');
+}
+
+async function findAllMediaFiles(dir, basePath, mediaType) {
   let results = [];
 
   try {
@@ -2294,10 +2333,10 @@ async function findAllImages(dir, basePath) {
       const stats = fs.statSync(fullPath);
 
       if (stats.isDirectory()) {
-        results = results.concat(await findAllImages(fullPath, basePath));
+        results = results.concat(await findAllMediaFiles(fullPath, basePath, mediaType));
       } else {
         const mimeType = await utils.getFileType(fullPath);
-        if (mimeType.startsWith('image/')) {
+        if (mimeType.startsWith(mediaType + '/')) {
           results.push({
             name: file,
             path: utils.normalizePath(path.relative(basePath, fullPath)),
@@ -2310,7 +2349,7 @@ async function findAllImages(dir, basePath) {
       }
     }
   } catch (error) {
-    console.error('Error finding images:', error);
+    console.error(`Error finding ${mediaType} files:`, error);
   }
 
   return results;
@@ -2345,7 +2384,7 @@ async function searchFilesInDirectory(dir, query, basePath) {
   return results;
 }
 
-async function findImagesInDirectory(dir, basePath) {
+async function findMediaFilesInDirectory(dir, basePath, mediaType) {
   let results = [];
 
   try {
@@ -2357,7 +2396,7 @@ async function findImagesInDirectory(dir, basePath) {
 
       if (!stats.isDirectory()) {
         const mimeType = await utils.getFileType(fullPath);
-        if (mimeType.startsWith('image/')) {
+        if (mimeType.startsWith(mediaType + '/')) {
           results.push({
             name: file,
             path: utils.normalizePath(path.relative(basePath, fullPath)),
@@ -2370,72 +2409,22 @@ async function findImagesInDirectory(dir, basePath) {
       }
     }
   } catch (error) {
-    console.error('Error finding images in directory:', error);
+    console.error(`Error finding ${mediaType} files in directory:`, error);
   }
 
   return results;
+}
+
+async function findImagesInDirectory(dir, basePath) {
+  return await findMediaFilesInDirectory(dir, basePath, 'image');
 }
 
 async function findAudiosInDirectory(dir, basePath) {
-  let results = [];
-
-  try {
-    const files = fs.readdirSync(dir);
-
-    for (const file of files) {
-      const fullPath = path.join(dir, file);
-      const stats = fs.statSync(fullPath);
-
-      if (!stats.isDirectory()) {
-        const mimeType = await utils.getFileType(fullPath);
-        if (mimeType.startsWith('audio/')) {
-          results.push({
-            name: file,
-            path: utils.normalizePath(path.relative(basePath, fullPath)),
-            size: stats.size,
-            mtime: stats.mtime,
-            mimeType: mimeType,
-            isDirectory: false
-          });
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error finding audios in directory:', error);
-  }
-
-  return results;
+  return await findMediaFilesInDirectory(dir, basePath, 'audio');
 }
 
 async function findVideosInDirectory(dir, basePath) {
-  let results = [];
-
-  try {
-    const files = fs.readdirSync(dir);
-
-    for (const file of files) {
-      const fullPath = path.join(dir, file);
-      const stats = fs.statSync(fullPath);
-
-      if (!stats.isDirectory()) {
-        const mimeType = await utils.getFileType(fullPath);
-        if (mimeType.startsWith('video/')) {
-          results.push({
-            name: file,
-            path: utils.normalizePath(path.relative(basePath, fullPath)),
-            size: stats.size,
-            mtime: stats.mtime,
-            mimeType: mimeType,
-            isDirectory: false
-          });
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error finding audios in directory:', error);
-  }
-
-  return results;
+  return await findMediaFilesInDirectory(dir, basePath, 'video');
 }
 
 async function parallelSearch(dir, query, basePath) {
@@ -2470,13 +2459,13 @@ async function parallelSearch(dir, query, basePath) {
   }
 }
 
-async function parallelFindImages(dir, basePath) {
+async function parallelFindMedia(dir, basePath, mediaType) {
   if (isMainThread) {
     try {
       const subdirs = utils.getSubdirectories(dir);
 
       if (subdirs.length === 0) {
-        return await findAllImages(dir, basePath);
+        return await findAllMediaFiles(dir, basePath, mediaType);
       }
 
       const numCores = os.cpus().length;
@@ -2489,19 +2478,21 @@ async function parallelFindImages(dir, basePath) {
         const end = Math.min(start + tasksPerWorker, subdirs.length);
         const workerSubdirs = subdirs.slice(start, end);
 
-        workers.push(createImageWorker(workerSubdirs, basePath));
+        workers.push(createMediaWorker(workerSubdirs, basePath, mediaType));
       }
 
-      const rootResults = await findImagesInDirectory(dir, basePath);
+      const rootResults = await findMediaFilesInDirectory(dir, basePath, mediaType);
       const workerResults = await Promise.all(workers);
 
       return rootResults.concat(...workerResults);
     } catch (error) {
-      return res.status(500).json({ error: 'Server error' });
+      throw new Error('Server error');
     }
-
   }
+}
 
+async function parallelFindImages(dir, basePath) {
+  return await parallelFindMedia(dir, basePath, 'image');
 }
 
 function createSearchWorker(directories, query, basePath) {
@@ -2520,10 +2511,10 @@ function createSearchWorker(directories, query, basePath) {
   });
 }
 
-function createImageWorker(directories, basePath) {
+function createMediaWorker(directories, basePath, mediaType) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
-      workerData: { task: 'findImages', directories, basePath }
+      workerData: { task: 'findMedia', directories, basePath, mediaType }
     });
 
     worker.on('message', resolve);
@@ -2536,8 +2527,12 @@ function createImageWorker(directories, basePath) {
   });
 }
 
+function createImageWorker(directories, basePath) {
+  return createMediaWorker(directories, basePath, 'image');
+}
+
 if (!isMainThread) {
-  const { task, directories, query, basePath } = workerData;
+  const { task, directories, query, basePath, mediaType } = workerData;
 
   if (task === 'search') {
     (async () => {
@@ -2560,10 +2555,25 @@ if (!isMainThread) {
 
       for (const dir of directories) {
         try {
-          const imageResults = await findAllImages(dir, basePath);
+          const imageResults = await findAllMediaFiles(dir, basePath, 'image');
           results = results.concat(imageResults);
         } catch (error) {
           console.error(`Error finding images in directory ${dir}:`, error);
+        }
+      }
+
+      parentPort.postMessage(results);
+    })();
+  } else if (task === 'findMedia') {
+    (async () => {
+      let results = [];
+
+      for (const dir of directories) {
+        try {
+          const mediaResults = await findAllMediaFiles(dir, basePath, mediaType);
+          results = results.concat(mediaResults);
+        } catch (error) {
+          console.error(`Error finding ${mediaType} files in directory ${dir}:`, error);
         }
       }
 
@@ -2808,5 +2818,4 @@ function sortFiles(files, sortBy = 'name', sortOrder = 'asc') {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-});   console.log(`Server running on port ${PORT}`);
-}); 
+});

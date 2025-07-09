@@ -18,7 +18,6 @@ interface VideoProps {
   onDownload?: () => void;
   onNext?: () => void;
   onPrev?: () => void;
-  // Fallbacks 
   onFullscreen?: (isFullscreen: boolean) => void;
   onPictureInPicture?: (isPictureInPicture: boolean) => void;
 }

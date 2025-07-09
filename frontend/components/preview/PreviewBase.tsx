@@ -726,29 +726,29 @@ export const PreviewBase: React.FC<PreviewBaseProps> = ({
   // !!!IMPORTANT!!!: If you are running this app in development mode, you should comment out this useEffect.
 
   // Handle browser back button to close preview
-  // useEffect(() => {
-  //   if (!onClose) return;
+  useEffect(() => {
+    if (!onClose) return;
     
-  //   // Add a new history entry when preview opens
-  //   history.pushState({ preview: true }, '', window.location.href);
+    // Add a new history entry when preview opens
+    history.pushState({ preview: true }, '', window.location.href);
     
-  //   // Handle popstate event (browser back button)
-  //   const handlePopState = (event: PopStateEvent) => {
-  //     // Close the preview
-  //     onClose();
-  //   };
+    // Handle popstate event (browser back button)
+    const handlePopState = (event: PopStateEvent) => {
+      // Close the preview
+      onClose();
+    };
     
-  //   window.addEventListener('popstate', handlePopState);
+    window.addEventListener('popstate', handlePopState);
     
-  //   // Cleanup: remove the event listener
-  //   return () => {
-  //     window.removeEventListener('popstate', handlePopState);
+    // Cleanup: remove the event listener
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
 
-  //     if (history.state && history.state.preview) {
-  //       history.back();
-  //     }
-  //   };
-  // }, [onClose]);
+      if (history.state && history.state.preview) {
+        history.back();
+      }
+    };
+  }, [onClose]);
 
   
   return (

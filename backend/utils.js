@@ -39,6 +39,8 @@ function getFileTypeByExt(extension) {
     '.gif': 'image/gif',
     '.bmp': 'image/bmp',
     '.psd': 'image/vnd.adobe.photoshop',
+    '.avif': 'image/avif',
+    '.webp': 'image/webp',
 
     // Video
     '.mp4': 'video/mp4',

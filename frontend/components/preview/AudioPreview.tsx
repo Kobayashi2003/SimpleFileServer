@@ -2,6 +2,7 @@
 
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import PreviewBase, { PreviewBaseProps } from "./PreviewBase";
+import { cn } from "@/lib/utils";
 import { Audio } from "@/components/audio/Audio";
 
 interface AudioPreviewProps extends Omit<PreviewBaseProps, 'children' | 'isLoading' | 'hasError'> {
@@ -55,16 +56,15 @@ export const AudioPreview: React.FC<AudioPreviewProps> = ({
       isLoading={isLoading}
       hasError={hasError}
       controls={{
-        // showClose: true,
         enableBackdropClose: true,
-        // showDownload: true,
-        // showNavigation: true,
         ...controls
       }}
       {...restProps}
+      title=""
     >
       <div className="flex flex-col items-center">
         <Audio
+          title={restProps.title}
           src={src}
           onLoad={handleLoad}
           onError={handleError}
@@ -72,7 +72,10 @@ export const AudioPreview: React.FC<AudioPreviewProps> = ({
           onPrev={controls?.onPrev}
           onDownload={controls?.onDownload}
           onClose={controls?.onClose}
-          className={isLoading || hasError ? "opacity-0" : ""}
+          className={cn(
+            isLoading || hasError ? "opacity-0" : "",
+            "max-w-[90vw] max-h-[90vh]"
+          )}
         />
       </div>
     </PreviewBase>

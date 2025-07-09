@@ -91,7 +91,9 @@ const previewSupported: Record<string, boolean> = {
 
 
 function FileExplorerContent() {
-  const { isAuthenticated, isCheckingAuth, username, permissions, logout, token } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { isAuthenticated, isCheckingAuth, username, permissions, logout } = useAuth();
   useEffect(() => {
     if (!isAuthenticated && !isCheckingAuth) {
       setIsLoginDialogOpen(true);
@@ -119,9 +121,6 @@ function FileExplorerContent() {
     };
   }, []);
 
-
-  const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [sortBy, setSortBy] = useState<'name' | 'size' | 'mtime'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -257,7 +256,7 @@ function FileExplorerContent() {
 
 
   const { data: filesExplorerData, isLoading: isLoadingData, error: errorData, refetch: refetchData, isRefetching: isRefetchingData } = useQuery({
-    queryKey: ['fileExplorer', currentPath, searchQuery, isImageOnlyMode, page, showDirectoryCovers, usePagination, sortBy, sortOrder, recursiveSearch],
+    queryKey: ['fileExplorer', isAuthenticated, currentPath, searchQuery, isImageOnlyMode, page, showDirectoryCovers, usePagination, sortBy, sortOrder, recursiveSearch],
     queryFn: async () => {
       if (!isAuthenticated) {
         return { files: [], hasMore: false, total: 0 };
@@ -369,8 +368,6 @@ function FileExplorerContent() {
   const isError = errorData;
   const isNotFound = !_isLoading && !isError && totalFiles === 0;
 
-  // console.log({ isLoading, _isLoading, isLoadingData, isUpdatingAccumulated, accumulatedFiles, totalFiles })
-  // console.log({ isLoading, _isLoading, isImageOnlyMode, isChangingPath, accumulatedFiles, totalFiles })
 
   // Add a delay before showing loading indicator
   useEffect(() => {
@@ -400,8 +397,13 @@ function FileExplorerContent() {
 
 
   const { data: previewContent, isLoading: contentLoading, error: contentError, refetch: refetchPreviewContent } = useQuery({
-    queryKey: ['fileContent', preview.path],
+    queryKey: ['fileContent', isAuthenticated, preview.path],
     queryFn: async () => {
+
+      if (!isAuthenticated) {
+        return null;
+      }
+
       if (!preview.isOpen || (preview.type !== 'text')) {
         return null;
       }
@@ -742,7 +744,7 @@ function FileExplorerContent() {
           });
 
           // Start upload
-          xhr.open('POST', `/api/upload?dir=${encodeURIComponent(currentPath)}${token ? `&token=${token}` : ''}`);
+          xhr.open('POST', `/api/upload?dir=${encodeURIComponent(currentPath)}`);
           xhr.send(formData);
         });
       }
@@ -865,7 +867,7 @@ function FileExplorerContent() {
           });
 
           // Start upload
-          xhr.open('POST', `/api/upload-folder?dir=${encodeURIComponent(currentPath)}${token ? `&token=${token}` : ''}`);
+          xhr.open('POST', `/api/upload-folder?dir=${encodeURIComponent(currentPath)}`);
           xhr.send(formData);
         });
       }
@@ -938,7 +940,7 @@ function FileExplorerContent() {
     // Store XHR reference for cancellation
     xhrRefsRef.current.set(downloadId, xhr);
 
-    xhr.open('GET', `/api/raw?path=${encodeURIComponent(path)}${token ? `&token=${token}` : ''}`);
+    xhr.open('GET', `/api/raw?path=${encodeURIComponent(path)}`);
     xhr.responseType = 'blob';
 
     // Update status to downloading
@@ -1019,14 +1021,14 @@ function FileExplorerContent() {
     };
 
     xhr.send();
-  }, [token]);
+  }, []);
 
   const handleDownloadMultiple = useCallback((paths: string[]) => {
     // This version will send a request to the backend's download endpoint,
     // and the final download will be a zip file.
 
     // TODO: Implement this version
-  }, [token]);
+  }, []);
 
   const handleDownloadMultiple2 = useCallback((paths: string[]) => {
     if (paths.length === 0) return;
@@ -1080,15 +1082,18 @@ function FileExplorerContent() {
   }, []);
 
   const handleRenameConfirm = useCallback((newName: string) => {
-    fetch(`/api/rename?path=${encodeURIComponent(fileToRename)}&newName=${encodeURIComponent(newName)}${token ? `&token=${token}` : ''}`, {
+    fetch(`/api/rename?path=${encodeURIComponent(fileToRename)}&newName=${encodeURIComponent(newName)}`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
     }).then(() => {
       refetchData();
       setRenameInputDialogOpen(false);
     }).catch((error) => {
       console.error('Error renaming file:', error);
     });
-  }, [fileToRename, token, refetchData]);
+  }, [fileToRename, refetchData]);
 
   const handleRenameCancel = useCallback(() => {
     setRenameInputDialogOpen(false);
@@ -1101,15 +1106,18 @@ function FileExplorerContent() {
   }, []);
 
   const handleMkdirConfirm = useCallback((path: string, name: string) => {
-    fetch(`/api/mkdir?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}${token ? `&token=${token}` : ''}`, {
+    fetch(`/api/mkdir?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
     }).then(() => {
       refetchData();
       setMkdirInputDialogOpen(false);
     }).catch((error) => {
       console.error('Error creating directory:', error);
     });
-  }, [token, refetchData]);
+  }, [refetchData]);
 
   const handleMkdirCancel = useCallback(() => {
     setMkdirInputDialogOpen(false);
@@ -1123,8 +1131,11 @@ function FileExplorerContent() {
   }, []);
 
   const handleDeleteConfirm = useCallback((path: string) => {
-    fetch(`/api/delete?path=${encodeURIComponent(path)}${token ? `&token=${token}` : ''}`, {
+    fetch(`/api/delete?path=${encodeURIComponent(path)}`, {
       method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      }
     }).then(() => {
       setFileToDelete('');
       setDeleteComfirmDialogOpen(false);
@@ -1132,7 +1143,7 @@ function FileExplorerContent() {
     }).catch((error) => {
       console.error('Error deleting file:', error);
     });
-  }, [token, refetchData]);
+  }, [refetchData]);
 
   const handleDeleteCancel = useCallback(() => {
     setFileToDelete('');
@@ -1145,8 +1156,11 @@ function FileExplorerContent() {
   }, []);
 
   const handleDeleteMultipleConfirm = useCallback((paths: string[]) => {
-    fetch(`/api/delete?paths=${encodeURIComponent(paths.join('|'))}${token ? `&token=${token}` : ''}`, {
+    fetch(`/api/delete?paths=${encodeURIComponent(paths.join('|'))}`, {
       method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      }
     }).then(() => {
       setSelectedFiles([]);
       setIsSelecting(false);
@@ -1155,7 +1169,7 @@ function FileExplorerContent() {
     }).catch((error) => {
       console.error('Error deleting files:', error);
     });
-  }, [token, refetchData]);
+  }, [refetchData]);
 
   const handleDeleteMultipleCancel = useCallback(() => {
     setDeleteMultipleDialogOpen(false);
@@ -1173,7 +1187,7 @@ function FileExplorerContent() {
 
   const handlePasteConfirm = useCallback((destinationPath: string) => {
     cloneTimerRef.current && clearTimeout(cloneTimerRef.current);
-    fetch(`/api/clone${token ? `?token=${token}` : ''}`, {
+    fetch(`/api/clone`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1189,7 +1203,7 @@ function FileExplorerContent() {
     }).catch((error) => {
       console.error('Error pasting files:', error);
     });
-  }, [filesToClone, token, refetchData]);
+  }, [filesToClone, refetchData]);
 
   const handlePasteCancel = useCallback(() => {
     setCloneComfirmDialogOpen(false);
@@ -1207,7 +1221,7 @@ function FileExplorerContent() {
 
   const handleMoveHereComfirm = useCallback((destinationPath: string) => {
     moveTimerRef.current && clearTimeout(moveTimerRef.current);
-    fetch(`/api/move${token ? `?token=${token}` : ''}`, {
+    fetch(`/api/move`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1223,7 +1237,7 @@ function FileExplorerContent() {
     }).catch((error) => {
       console.error('Error moving files:', error);
     });
-  }, [filesToMove, token, refetchData]);
+  }, [filesToMove, refetchData]);
 
   const handleMoveHereCancel = useCallback(() => {
     setMoveComfirmDialogOpen(false)
@@ -1826,14 +1840,14 @@ function FileExplorerContent() {
         });
 
         const endpoint = containsFolder
-          ? `/api/upload-folder?dir=${encodeURIComponent(currentPath)}${token ? `&token=${token}` : ''}`
-          : `/api/upload?dir=${encodeURIComponent(currentPath)}${token ? `&token=${token}` : ''}`;
+          ? `/api/upload-folder?dir=${encodeURIComponent(currentPath)}`
+          : `/api/upload?dir=${encodeURIComponent(currentPath)}`;
 
         xhr.open('POST', endpoint);
         xhr.send(formData);
       });
     }
-  }, [currentPath, token, refetchData]);
+  }, [currentPath, refetchData]);
 
   const handleDoubleClick = useCallback(() => {
     if (preview.isOpen || !useDoubleClick) return;
@@ -2538,7 +2552,6 @@ function FileExplorerContent() {
                         focusedIndex={focusedFileIndex}
                         useImageQuickPreview={useImageQuickPreview}
                         direction={gridDirection}
-                        token={token}
                         onFileClick={handleFileClick}
                         onCopy={handleCopy}
                         onCut={handleMoveFrom}
@@ -2562,7 +2575,6 @@ function FileExplorerContent() {
                         isSelecting={isSelecting}
                         focusedIndex={focusedFileIndex}
                         useImageQuickPreview={useImageQuickPreview}
-                        token={token}
                         onFileClick={handleFileClick}
                         onCopy={handleCopy}
                         onCut={handleMoveFrom}
@@ -2604,10 +2616,10 @@ function FileExplorerContent() {
               <ImagePreview
                 isOpen={preview.isOpen}
                 title={isImageOnlyMode ? preview.path : preview.path.split('/').pop()}
-                src={`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`}
+                src={`/api/raw?path=${encodeURIComponent(preview.path)}`}
                 controls={{
                   onClose: closePreview,
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                   onNext: () => navigatePreview('next'),
                   onPrev: () => navigatePreview('prev'),
                 }}
@@ -2619,10 +2631,10 @@ function FileExplorerContent() {
               <VideoPreview
                 isOpen={preview.isOpen}
                 title={preview.path.split('/').pop()}
-                src={`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`}
+                src={`/api/raw?path=${encodeURIComponent(preview.path)}`}
                 controls={{
                   onClose: closePreview,
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                   onNext: () => navigatePreview('next'),
                   onPrev: () => navigatePreview('prev'),
                 }}
@@ -2634,10 +2646,10 @@ function FileExplorerContent() {
               <AudioPreview
                 isOpen={preview.isOpen}
                 title={preview.path.split('/').pop()}
-                src={`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`}
+                src={`/api/raw?path=${encodeURIComponent(preview.path)}`}
                 controls={{
                   onClose: closePreview,
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                   onNext: () => navigatePreview('next'),
                   onPrev: () => navigatePreview('prev'),
                 }}
@@ -2655,7 +2667,7 @@ function FileExplorerContent() {
                 hasError={!!contentError}
                 controls={{
                   onClose: closePreview,
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                 }}
               />
             )}
@@ -2665,10 +2677,10 @@ function FileExplorerContent() {
               <PDFPreview
                 isOpen={preview.isOpen}
                 title={preview.path.split('/').pop()}
-                src={`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`}
+                src={`/api/raw?path=${encodeURIComponent(preview.path)}`}
                 controls={{
                   onClose: closePreview,
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                 }}
               />
             )}
@@ -2678,12 +2690,12 @@ function FileExplorerContent() {
               <ComicPreview
                 isOpen={preview.isOpen}
                 title={preview.path.split('/').pop()}
-                src={`/api/comic?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`}
+                src={`/api/comic?path=${encodeURIComponent(preview.path)}`}
                 controls={{
                   onClose: closePreview,
                   onNext: () => navigatePreview('next'),
                   onPrev: () => navigatePreview('prev'),
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                 }}
               />
             )}
@@ -2692,10 +2704,10 @@ function FileExplorerContent() {
               <EPUBPreview
                 isOpen={preview.isOpen}
                 title={preview.path.split('/').pop()}
-                src={`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`}
+                src={`/api/raw?path=${encodeURIComponent(preview.path)}`}
                 controls={{
                   onClose: closePreview,
-                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}${token ? `&token=${token}` : ''}`, '_blank'),
+                  onDownload: () => window.open(`/api/raw?path=${encodeURIComponent(preview.path)}`, '_blank'),
                 }}
               />
             )}
@@ -2798,7 +2810,6 @@ function FileExplorerContent() {
           confirmText="Download"
           cancelText="Cancel"
           onConfirm={() => {
-            // window.open(`/api/raw?path=${encodeURIComponent(fileToDownload)}${token ? `&token=${token}` : ''}`, '_blank');
             handleDownload(fileToDownload);
             setFileToDownload('');
             setDownloadComfirmDialogOpen(false);

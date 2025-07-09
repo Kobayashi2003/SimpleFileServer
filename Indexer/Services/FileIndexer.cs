@@ -230,6 +230,12 @@ public class FileIndexer
                 normalizedBaseDirectory += Path.DirectorySeparatorChar;
             }
             
+            // Also ensure absolute path ends with separator if it's a directory
+            if (Directory.Exists(normalizedAbsolutePath) && !normalizedAbsolutePath.EndsWith(Path.DirectorySeparatorChar))
+            {
+                normalizedAbsolutePath += Path.DirectorySeparatorChar;
+            }
+            
             if (normalizedAbsolutePath.StartsWith(normalizedBaseDirectory, StringComparison.OrdinalIgnoreCase))
             {
                 var relativePath = normalizedAbsolutePath.Substring(normalizedBaseDirectory.Length);

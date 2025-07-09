@@ -13,7 +13,6 @@ interface MasonryCellProps {
   data: {
     columnCount: number;
     columnWidth: number;
-    token?: string;
     files: FileData[];
     selectedFiles: string[];
     isSelecting: boolean;
@@ -32,7 +31,7 @@ interface MasonryCellProps {
 }
 
 const MasonryCell = React.memo(({ index, style, data }: MasonryCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, columnWidth, direction, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, token, focusedIndex } = data;
+  const { files, selectedFiles, isSelecting, columnCount, columnWidth, direction, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
   // Each index represents a column of images
   if (index >= columnCount) return null;
 
@@ -58,8 +57,8 @@ const MasonryCell = React.memo(({ index, style, data }: MasonryCellProps) => {
             <ContextMenuTrigger>
               <ImageItem
                 {...file}
-                src={`/api/raw?path=${encodeURIComponent(file.path)}${token ? `&token=${token}` : ''}`}
-                thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
+                src={`/api/raw?path=${encodeURIComponent(file.path)}`}
+                thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80`}
                 alt={file.name}
                 onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
                 className={cn(
@@ -124,7 +123,6 @@ interface MasonryViewProps {
   focusedIndex: number | null;
   useImageQuickPreview: boolean;
   direction: 'ltr' | 'rtl';
-  token?: string | null;
   onFileClick: (path: string, mimeType: string, isDirectory: boolean) => void;
   onCopy: (path: string) => void;
   onCut: (path: string) => void;
@@ -145,7 +143,6 @@ export const MasonryView = React.memo(({
   focusedIndex,
   useImageQuickPreview,
   direction,
-  token,
   onFileClick,
   onCopy,
   onCut,
@@ -176,7 +173,6 @@ export const MasonryView = React.memo(({
           data={{
             columnCount,
             columnWidth,
-            token: token || undefined,
             files,
             selectedFiles,
             isSelecting,

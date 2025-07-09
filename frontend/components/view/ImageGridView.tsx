@@ -84,7 +84,6 @@ interface ImageCellProps {
   style: React.CSSProperties;
   data: {
     columnCount: number;
-    token?: string;
     files: FileData[];
     selectedFiles: string[];
     isSelecting: boolean;
@@ -102,7 +101,7 @@ interface ImageCellProps {
 }
 
 const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, token, focusedIndex } = data;
+  const { files, selectedFiles, isSelecting, columnCount, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
   const index = rowIndex * columnCount + columnIndex;
   if (index >= files.length) return null;
 
@@ -129,8 +128,8 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
           onDelete={onDelete}
         >
           <ImageItem
-            src={`/api/raw?path=${encodeURIComponent(file.path)}${token ? `&token=${token}` : ''}`}
-            thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
+            src={`/api/raw?path=${encodeURIComponent(file.path)}`}
+            thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80`}
             alt={file.name}
             onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
             className={commonClassName}
@@ -156,7 +155,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
         >
           <VideoItem
             alt={file.name}
-            thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
+            thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80`}
             onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
             className={commonClassName}
             loading="eager"
@@ -180,7 +179,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
         >
           <EPUBItem
             alt={file.name}
-            thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80${token ? `&token=${token}` : ''}`}
+            thumbnail={`/api/thumbnail?path=${encodeURIComponent(file.path)}&width=300&quality=80`}
             onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
             className={commonClassName}
             loading="eager"
@@ -204,7 +203,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
         >
           <FileItemGridView
             {...file}
-            cover={file.cover ? `/api/thumbnail?path=${encodeURIComponent(file.cover)}&width=300&quality=80${token ? `&token=${token}` : ''}` : undefined}
+            cover={file.cover ? `/api/thumbnail?path=${encodeURIComponent(file.cover)}&width=300&quality=80` : undefined}
             onClick={() => onFileClick(file.path, file.mimeType || 'application/octet-stream', file.isDirectory)}
             className={cn(
               "text-black hover:text-gray-600 hover:bg-accent",
@@ -247,7 +246,7 @@ interface ImageGridViewProps {
   imageGridRef: React.RefObject<Grid | null>;
 }
 
-export const ImageGridView = React.memo(({
+export function ImageGridView({
   height,
   width,
   files,
@@ -255,7 +254,6 @@ export const ImageGridView = React.memo(({
   isSelecting,
   focusedIndex,
   useImageQuickPreview,
-  token,
   onFileClick,
   onCopy,
   onCut,
@@ -267,7 +265,7 @@ export const ImageGridView = React.memo(({
   onScroll,
   onItemsRendered,
   imageGridRef
-}: ImageGridViewProps) => {
+}: ImageGridViewProps) {
   const columnCount = getColumnCount(width);
   const rowCount = Math.ceil(files.length / columnCount);
   const cellWidth = width / columnCount;
@@ -293,7 +291,6 @@ export const ImageGridView = React.memo(({
       overscanColumnCount={5}
       itemData={{
         columnCount,
-        token: token || undefined,
         files,
         selectedFiles,
         isSelecting,
@@ -315,6 +312,6 @@ export const ImageGridView = React.memo(({
       {ImageCell}
     </Grid>
   );
-});
+}
 
 ImageGridView.displayName = 'ImageGridView'; 

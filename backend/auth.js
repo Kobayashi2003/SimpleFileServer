@@ -1,4 +1,51 @@
 const config = require('./config');
+const crypto = require('crypto');
+
+// Session store - should use Redis or database in production
+const sessions = new Map();
+
+// Generate session ID
+function generateSessionId() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Session management
+function createSession(username, permissions) {
+  const sessionId = generateSessionId();
+  const session = {
+    username,
+    permissions,
+    createdAt: Date.now(),
+    lastAccessed: Date.now()
+  };
+  sessions.set(sessionId, session);
+  return sessionId;
+}
+
+function getSession(sessionId) {
+  const session = sessions.get(sessionId);
+  if (session) {
+    session.lastAccessed = Date.now();
+    return session;
+  }
+  return null;
+}
+
+function deleteSession(sessionId) {
+  return sessions.delete(sessionId);
+}
+
+// Clean up expired sessions (run periodically)
+setInterval(() => {
+  const now = Date.now();
+  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+  
+  for (const [sessionId, session] of sessions.entries()) {
+    if (now - session.lastAccessed > maxAge) {
+      sessions.delete(sessionId);
+    }
+  }
+}, 60 * 60 * 1000); // Clean up every hour
 
 // Parse Authorization header
 function parseAuthHeader(authHeader) {
@@ -52,49 +99,48 @@ function authMiddleware(req, res, next) {
     return next();
   }
 
-  const token = req.query.token;
-
-  if (token) {
-    const credentials = Buffer.from(token, 'base64').toString('utf8');
-    const [username, password] = credentials.split(':');
-
-    const userStatus = validateUser(username, password);
-    if (userStatus.isAuthenticated) {
-      req.user = userStatus;
+  // First try session cookie
+  const sessionId = req.cookies.sessionId;
+  if (sessionId) {
+    const session = getSession(sessionId);
+    if (session) {
+      req.user = {
+        isAuthenticated: true,
+        username: session.username,
+        permissions: session.permissions
+      };
       return next();
     }
-    return res.status(401).json({ error: 'Invalid credentials' });
-
-  } else {
-    // Get Authorization header
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader) {
-      // No credentials provided, return 401 and request authentication
-      res.setHeader('WWW-Authenticate', 'Basic realm="Simple File Server"');
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-  
-    // Parse credentials
-    const credentials = parseAuthHeader(authHeader);
-    
-    if (!credentials) {
-      res.setHeader('WWW-Authenticate', 'Basic realm="Simple File Server"');
-      return res.status(401).json({ error: 'Invalid authentication format' });
-    }
-  
-    // Validate user
-    const userStatus = validateUser(credentials.username, credentials.password);
-    
-    if (!userStatus.isAuthenticated) {
-      res.setHeader('WWW-Authenticate', 'Basic realm="Simple File Server"');
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-  
-    // If validation is successful, save user info to request object
-    req.user = userStatus;
-    next();
   }
+
+  // Fallback to Basic Auth
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    // No credentials provided, return 401 and request authentication
+    res.setHeader('WWW-Authenticate', 'Basic realm="Simple File Server"');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  // Parse credentials
+  const credentials = parseAuthHeader(authHeader);
+  
+  if (!credentials) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Simple File Server"');
+    return res.status(401).json({ error: 'Invalid authentication format' });
+  }
+
+  // Validate user
+  const userStatus = validateUser(credentials.username, credentials.password);
+  
+  if (!userStatus.isAuthenticated) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="Simple File Server"');
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  // If validation is successful, save user info to request object
+  req.user = userStatus;
+  next();
 }
 
 // Write permission check middleware
@@ -114,5 +160,9 @@ function writePermissionMiddleware(req, res, next) {
 
 module.exports = {
   authMiddleware,
-  writePermissionMiddleware
+  writePermissionMiddleware,
+  validateUser,
+  createSession,
+  getSession,
+  deleteSession
 }; 

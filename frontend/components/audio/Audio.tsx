@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { cn } from "@/lib/utils";
 import {
-  Play, Pause, Volume2, VolumeX, SkipBack, SkipForward,
-  Settings, Download, HelpCircle, Repeat, Shuffle
+  Play, Pause, Volume1, Volume2, VolumeX, SkipBack, SkipForward,
+  Settings, Download, HelpCircle, Repeat, Shuffle, List, RotateCw, RotateCcw
 } from 'lucide-react';
 
 interface AudioProps {
+  title?: string;
   src: string;
   autoPlay?: boolean;
   className?: string;
@@ -20,6 +21,7 @@ interface AudioProps {
 }
 
 export const Audio = ({
+  title,
   src,
   autoPlay = false,
   className,
@@ -30,11 +32,9 @@ export const Audio = ({
   onNext,
   onPrev,
 }: AudioProps) => {
-  // Core audio refs
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
 
-  // Core audio state
   const [isPlaying, setIsPlaying] = useState(autoPlay);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -42,14 +42,8 @@ export const Audio = ({
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
 
-  // UI state
-  const [showSettings, setShowSettings] = useState(false);
-  const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
-  const [isRepeat, setIsRepeat] = useState(false);
-  const [isShuffle, setIsShuffle] = useState(false);
+  const [playMode, setPlayMode] = useState<'sequential' | 'repeat' | 'shuffle'>('sequential');
 
-  // Refs for settings menu and keyboard shortcuts
-  const settingsRef = useRef<HTMLDivElement>(null);
   const keyboardShortcutsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Format time in MM:SS format
@@ -59,7 +53,6 @@ export const Audio = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Audio control functions
   const togglePlay = () => {
     if (audioRef.current) {
       if (isPlaying) {
@@ -108,11 +101,9 @@ export const Audio = ({
     if (audioRef.current) {
       audioRef.current.playbackRate = rate;
       setPlaybackRate(rate);
-      setShowSettings(false);
     }
   };
 
-  // Event listeners
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -130,7 +121,7 @@ export const Audio = ({
     };
     const onEnded = () => {
       setIsPlaying(false);
-      if (isRepeat) {
+      if (playMode === 'repeat') {
         audio.currentTime = 0;
         audio.play().catch(console.error);
       } else if (onNext) {
@@ -153,9 +144,8 @@ export const Audio = ({
       audio.removeEventListener('volumechange', onVolumeChange);
       audio.removeEventListener('ended', onEnded);
     };
-  }, [onLoad, isRepeat, onNext]);
+  }, [onLoad, playMode, onNext]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
@@ -192,23 +182,33 @@ export const Audio = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [volume]);
 
-  // Show keyboard shortcuts
-  const showKeyboardShortcutsHelp = () => {
-    setShowKeyboardShortcuts(true);
-    if (keyboardShortcutsTimeoutRef.current) {
-      clearTimeout(keyboardShortcutsTimeoutRef.current);
-    }
-    keyboardShortcutsTimeoutRef.current = setTimeout(() => {
-      setShowKeyboardShortcuts(false);
-    }, 3000);
+  const togglePlayMode = () => {
+    const modes: Array<'sequential' | 'repeat' | 'shuffle'> = ['sequential', 'repeat', 'shuffle'];
+    const currentIndex = modes.indexOf(playMode);
+    const nextIndex = (currentIndex + 1) % modes.length;
+    setPlayMode(modes[nextIndex]);
   };
+
+  const getPlayModeInfo = () => {
+    switch (playMode) {
+      case 'sequential':
+        return { icon: <List size={20} />, tooltip: 'Sequential Play' };
+      case 'repeat':
+        return { icon: <Repeat size={20} />, tooltip: 'Repeat' };
+      case 'shuffle':
+        return { icon: <Shuffle size={20} />, tooltip: 'Shuffle' };
+    }
+  };
+
+  const playModeInfo = getPlayModeInfo();
 
   return (
     <div className={cn(
       "w-full max-w-3xl",
-      "bg-gradient-to-br from-gray-900 to-gray-800",
-      "rounded-xl shadow-xl p-6",
-      "text-white",
+      "bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900",
+      "rounded-2xl shadow-2xl p-8",
+      "text-white backdrop-blur-sm",
+      "border border-gray-700/50",
       className
     )}>
       <audio
@@ -219,178 +219,174 @@ export const Audio = ({
         className="hidden"
       />
 
+      {/* Title */}
+      {title && (
+        <div className="mb-6 text-center">
+          <h2 className="text-xl font-semibold text-white/90 truncate hover:text-white transition-colors">{title}</h2>
+        </div>
+      )}
+
       {/* Progress bar */}
       <div
         ref={progressRef}
         onClick={handleProgressClick}
-        className="relative h-2 bg-gray-600 rounded-full cursor-pointer mb-4 group"
+        className="relative h-2 bg-gray-700/50 rounded-full cursor-pointer mb-4 group hover:h-3 transition-all"
       >
         <div
-          className="absolute h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
+          className="absolute h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full"
           style={{ width: `${(currentTime / duration) * 100}%` }}
         />
-        <div className="absolute h-3 w-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity -top-0.5"
+        <div 
+          className="absolute h-4 w-4 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 -top-1 shadow-lg shadow-black/20"
           style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translateX(-50%)' }}
         />
       </div>
 
       {/* Time display */}
-      <div className="flex justify-between text-sm text-gray-400 mb-4">
-        <span>{formatTime(currentTime)}</span>
-        <span>{formatTime(duration)}</span>
+      <div className="flex justify-between text-sm font-medium text-gray-400/80 mb-6">
+        <span className="hover:text-gray-300 transition-colors">{formatTime(currentTime)}</span>
+        <span className="hover:text-gray-300 transition-colors">{formatTime(duration)}</span>
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          {/* Shuffle button */}
-          <button
-            onClick={() => setIsShuffle(!isShuffle)}
-            className={cn(
-              "hover:text-gray-300 transition-colors p-2 rounded-full",
-              isShuffle ? "text-blue-500" : "text-gray-400"
-            )}
-          >
-            <Shuffle size={20} />
-          </button>
-
+      {/* Controls - Three Rows Layout */}
+      <div className="flex flex-col gap-6 items-center justify-center w-full">
+        {/* First row: Track and playback controls */}
+        <div className="flex items-center justify-center gap-6 w-full">
           {/* Previous track */}
           {onPrev && (
             <button
               onClick={onPrev}
-              className="hover:text-gray-300 transition-colors p-2 rounded-full"
+              className="hover:text-blue-400 transition-all p-2 rounded-full hover:scale-110"
+              title="Previous"
             >
-              <SkipBack size={20} />
+              <SkipBack size={22} />
             </button>
           )}
+
+          {/* Rewind 5s */}
+          <button
+            onClick={() => skip(-5)}
+            className="hover:text-blue-400 transition-all p-2 rounded-full hover:scale-110 relative"
+            title="Rewind 5 seconds"
+          >
+            <RotateCcw size={30} className="opacity-90" />
+            <span className="absolute inset-0 flex items-center justify-center text-sm font-medium">5</span>
+          </button>
 
           {/* Play/Pause button */}
           <button
             onClick={togglePlay}
-            className="bg-gradient-to-r from-blue-500 to-purple-500 p-3 rounded-full hover:opacity-90 transition-opacity"
+            className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 p-4 rounded-full 
+                     hover:opacity-90 transition-all hover:scale-105 hover:shadow-xl hover:shadow-purple-500/20"
+            title={isPlaying ? "Pause" : "Play"}
           >
-            {isPlaying ? <Pause size={24} /> : <Play size={24} />}
+            {isPlaying ? <Pause size={28} /> : <Play size={28} />}
+          </button>
+
+          {/* Fast-forward 30s */}
+          <button
+            onClick={() => skip(30)}
+            className="hover:text-blue-400 transition-all p-2 rounded-full hover:scale-110 relative"
+            title="Fast-forward 30 seconds"
+          >
+            <RotateCw size={30} className="opacity-90" />
+            <span className="absolute inset-0 flex items-center justify-center text-sm font-medium">30</span>
           </button>
 
           {/* Next track */}
           {onNext && (
             <button
               onClick={onNext}
-              className="hover:text-gray-300 transition-colors p-2 rounded-full"
+              className="hover:text-blue-400 transition-all p-2 rounded-full hover:scale-110"
+              title="Next"
             >
-              <SkipForward size={20} />
+              <SkipForward size={22} />
             </button>
           )}
-
-          {/* Repeat button */}
-          <button
-            onClick={() => setIsRepeat(!isRepeat)}
-            className={cn(
-              "hover:text-gray-300 transition-colors p-2 rounded-full",
-              isRepeat ? "text-blue-500" : "text-gray-400"
-            )}
-          >
-            <Repeat size={20} />
-          </button>
         </div>
 
-        {/* Volume and settings controls */}
-        <div className="flex items-center gap-3">
-          {/* Volume control */}
-          <div className="flex items-center group">
+        {/* Second row: Volume control */}
+        <div className="flex items-center justify-center gap-3 w-full">
+          {/* Volume control styled like the screenshot */}
+          <div className="flex-1 flex items-center gap-3 bg-gray-800/50 p-2 rounded-full max-w-md">
+            {/* Mute/Unmute button */}
             <button
               onClick={toggleMute}
-              className="hover:text-gray-300 transition-colors p-2 rounded-full"
+              className="hover:text-blue-400 transition-all p-2 rounded-full hover:scale-110 shrink-0"
+              title={isMuted ? "Unmute" : "Mute"}
             >
-              {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              {isMuted ? <VolumeX size={20} /> : <Volume1 size={20} />}
             </button>
-            <div className="w-0 overflow-hidden transition-all duration-200 group-hover:w-20">
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={isMuted ? 0 : volume}
-                onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                className="w-20 accent-blue-500"
-              />
+            {/* Volume slider */}
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={isMuted ? 0 : volume}
+              onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+              className="flex-1 h-1.5 bg-gray-600/50 rounded-lg accent-blue-500 outline-none transition-all hover:accent-blue-400"
+              style={{ appearance: 'none' }}
+              title="Volume"
+            />
+            {/* Max volume icon */}
+            <div className="p-2 shrink-0">
+              <Volume2 size={20} className={cn("transition-opacity", isMuted ? 'opacity-30' : 'opacity-70')} />
             </div>
           </div>
+        </div>
 
-          {/* Help button */}
+        {/* Third row: Other function buttons */}
+        <div className="flex items-center justify-center gap-3 w-full">
+          {/* Play mode button */}
           <button
-            onClick={showKeyboardShortcutsHelp}
-            className="hover:text-gray-300 transition-colors p-2 rounded-full"
+            onClick={togglePlayMode}
+            className={cn(
+              "hover:scale-110 transition-all p-2 rounded-full relative group",
+              playMode === 'repeat' ? "text-blue-400" : 
+              playMode === 'shuffle' ? "text-purple-400" : "text-gray-400/80"
+            )}
+            title={playModeInfo.tooltip}
           >
-            <HelpCircle size={20} />
+            {playModeInfo.icon}
+            {/* Tooltip */}
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-800 
+                          text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity 
+                          pointer-events-none whitespace-nowrap shadow-lg border border-gray-700/50">
+              {playModeInfo.tooltip}
+            </div>
           </button>
 
-          {/* Settings */}
-          <div className="relative" ref={settingsRef}>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="hover:text-gray-300 transition-colors p-2 rounded-full"
-            >
-              <Settings size={20} />
-            </button>
-
-            {showSettings && (
-              <div className="absolute bottom-full right-0 mb-2 bg-gray-800 border border-gray-700 min-w-[150px] p-2 rounded-lg shadow-xl">
-                <div className="text-sm mb-2 font-medium px-2">Playback Speed</div>
-                <div className="flex flex-col gap-1">
-                  {[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].map(rate => (
-                    <button
-                      key={rate}
-                      onClick={() => changePlaybackRate(rate)}
-                      className={cn(
-                        "text-left px-4 py-2 rounded hover:bg-gray-700 transition-colors",
-                        playbackRate === rate ? "bg-gray-700 text-blue-500" : ""
-                      )}
-                    >
-                      {rate}x
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+          {/* Playback Speed Controls */}
+          <div className="flex items-center gap-1">
+            {[0.5, 0.75, 1.0, 1.25, 2.0].map(rate => (
+              <button
+                key={rate}
+                onClick={() => changePlaybackRate(rate)}
+                className={cn(
+                  "px-2 py-0.5 rounded-full text-xs font-medium transition-all hover:scale-105",
+                  playbackRate === rate 
+                    ? "bg-blue-500/20 text-blue-400 ring-1 ring-blue-400/30" 
+                    : "text-gray-400/80 hover:text-blue-400"
+                )}
+              >
+                {rate}x
+              </button>
+            ))}
           </div>
 
           {/* Download button */}
           {onDownload && (
             <button
               onClick={onDownload}
-              className="hover:text-gray-300 transition-colors p-2 rounded-full"
+              className="hover:text-blue-400 transition-all p-2 rounded-full hover:scale-110"
+              title="Download"
             >
               <Download size={20} />
             </button>
           )}
         </div>
       </div>
-
-      {/* Keyboard shortcuts info */}
-      {showKeyboardShortcuts && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-700 text-xs p-4 rounded-lg shadow-xl">
-          <div className="text-center font-medium text-sm mb-2">Keyboard Shortcuts</div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-            <div className="flex items-center">
-              <span className="bg-gray-700 px-2 py-1 rounded mr-2">Space</span>
-              <span>Play/Pause</span>
-            </div>
-            <div className="flex items-center">
-              <span className="bg-gray-700 px-2 py-1 rounded mr-2">←→</span>
-              <span>Skip 10s</span>
-            </div>
-            <div className="flex items-center">
-              <span className="bg-gray-700 px-2 py-1 rounded mr-2">↑↓</span>
-              <span>Volume</span>
-            </div>
-            <div className="flex items-center">
-              <span className="bg-gray-700 px-2 py-1 rounded mr-2">M</span>
-              <span>Mute</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

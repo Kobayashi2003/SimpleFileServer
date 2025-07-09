@@ -21,8 +21,6 @@ const config = {
   baseDirectory: BASE_DIR,
   // Temporary directory for cache and temporary files
   tempDirectory: TMP_DIR,
-  // Directory for storing log files
-  logsDirectory: process.env.LOG_DIRECTORY || 'logs',
 
   // File processing mode (parallel/sync)
   // Enable parallel file processing for better performance when file indexing is disabled
@@ -35,6 +33,30 @@ const config = {
   // Maximum file size for content display (default: 5GB)
   contentMaxSize: process.env.CONTENT_MAX_SIZE || 5 * 1024 * 1024 * 1024, // 5GB
 
+  // *** Logging options
+  // **************************************************
+  // Directory for storing log files
+  logsDirectory: process.env.LOG_DIRECTORY || 'logs',
+  // Enable console output with timestamps
+  enableConsoleTimestamps: process.env.ENABLE_CONSOLE_TIMESTAMPS !== 'false', // Default: true
+  // Enable error logging to files
+  enableErrorLogging: process.env.ENABLE_ERROR_LOGGING !== 'false', // Default: true
+  // Enable API logging
+  enableApiLogging: process.env.ENABLE_API_LOGGING !== 'false', // Default: true
+  // Enable file logging (save logs to files)
+  enableFileLogging: process.env.ENABLE_FILE_LOGGING === 'true' || false,
+  // API log level: 'basic', 'detailed', 'verbose'
+  apiLogLevel: process.env.API_LOG_LEVEL || 'detailed',
+  // Whether to log request body (for sensitive operations, set to false)
+  logRequestBody: process.env.LOG_REQUEST_BODY !== 'false', // Default: true
+  // Whether to log response body (for large responses, set to false)
+  logResponseBody: process.env.LOG_RESPONSE_BODY === 'false', // Default: false
+  // Log file rotation: 'daily', 'weekly', 'monthly', 'none' (default: daily)
+  logFileRotation: process.env.LOG_FILE_ROTATION || 'daily',
+  // Maximum log file size in MB before rotation (default: 10MB)
+  maxLogFileSize: parseInt(process.env.MAX_LOG_FILE_SIZE) || 10,
+  // Number of log files to keep (default: 7)
+  logFilesToKeep: parseInt(process.env.LOG_FILES_TO_KEEP) || 7,
 
 
   // *** Image related options
@@ -139,51 +161,6 @@ const config = {
 
 }
 
-const originalStdoutWrite = process.stdout.write;
-process.stdout.write = (chunk, encoding, callback) => {
-  const date = new Date().toISOString();
-  return originalStdoutWrite.call(process.stdout, `[${date}] ${chunk}`, encoding, callback);
-};
-
-const originalStderrWrite = process.stderr.write;
-process.stderr.write = (chunk, encoding, callback) => {
-  const date = new Date().toISOString();
-  return originalStderrWrite.call(process.stderr, `[${date}] ${chunk}`, encoding, callback);
-};
-
-process
-  .on('uncaughtException', (error, origin) => {
-    const errorTime = new Date().toISOString();
-    const errorLog = `
-    ====== Uncaught Exception at ${errorTime} ======
-    Origin: ${origin}
-    Error: ${error}
-    Stack: ${error.stack}
-    ================================================
-    `;
-
-    fs.appendFileSync(path.join(config.logsDirectory, 'crash.log'), errorLog);
-    console.error(`[${errorTime}] Uncaught Exception:`, error);
-    // exit if the error is not recoverable
-    if (!utils.isRecoverableError(error)) {
-      process.exit(1);
-    }
-  })
-  .on('unhandledRejection', (reason, promise) => {
-    const errorTime = new Date().toISOString();
-    const errorLog = `
-    ====== Unhandled Rejection at ${errorTime} ======
-    Promise: ${promise}
-    Reason: ${reason}
-    ${reason.stack ? `Stack: ${reason.stack}` : ''}
-    ================================================
-    `;
-
-    fs.appendFileSync(path.join(config.logsDirectory, 'rejections.log'), errorLog);
-    console.error(`[${errorTime}] Unhandled Rejection:`, reason);
-  });
-
-
 if (!fs.existsSync(config.baseDirectory)) {
   fs.mkdirSync(config.baseDirectory, { recursive: true });
 }
@@ -203,7 +180,5 @@ if (config.generateThumbnail && !fs.existsSync(config.thumbnailCacheDir)) {
 if (config.processPsd && !fs.existsSync(config.psdCacheDir)) {
   fs.mkdirSync(config.psdCacheDir, { recursive: true });
 }
-
-
 
 module.exports = config;

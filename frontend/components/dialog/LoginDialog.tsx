@@ -34,18 +34,9 @@ export function LoginDialog({ open, setOpen, className }: LoginDialogProps) {
     setError(null);
     
     try {
-      // Create Basic Auth credentials
-      const credentials = btoa(`${username}:${password}`);
-      
-      // Test credentials by calling the version API
-      const response = await axios.get('/api/version', {
-        headers: {
-          Authorization: `Basic ${credentials}`
-        }
-      });
+      await login(username, password);
       
       // Login successful
-      login(credentials, username, response.data.permissions);
       setOpen(false);
       
       // Clear form
@@ -94,7 +85,7 @@ export function LoginDialog({ open, setOpen, className }: LoginDialogProps) {
             <Input
               id="username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value.trim())}
               placeholder="Enter your username"
               disabled={loading}
               className="bg-black/40 border-white/20 text-white"
