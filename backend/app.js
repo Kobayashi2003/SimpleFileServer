@@ -548,7 +548,7 @@ app.get('/api/files', async (req, res) => {
 });
 
 app.get('/api/search', (req, res) => {
-  const { query, dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc', recursive = 'false' } = req.query;
+  const { query, dir = '', page, limit = 100, sortBy = 'name', sortOrder = 'asc', recursive = 'false', type } = req.query;
   const basePath = path.resolve(config.baseDirectory);
   const searchPath = path.join(basePath, dir);
 
@@ -561,7 +561,7 @@ app.get('/api/search', (req, res) => {
 
     // Use file index if enabled
     if (config.useFileIndex && indexer.isIndexBuilt()) {
-      const searchResult = indexer.searchIndex(query, dir, page, limit, sortBy, sortOrder, isRecursive);
+      const searchResult = indexer.searchIndex(query, dir, page, limit, sortBy, sortOrder, isRecursive, type);
       return res.json(searchResult);
     }
 
@@ -570,6 +570,11 @@ app.get('/api/search', (req, res) => {
       // Use existing recursive search implementation
       parallelSearch(searchPath, query, basePath)
         .then(results => {
+          // Filter by type if specified
+          if (type && ['image', 'audio', 'video'].includes(type)) {
+            results = results.filter(file => file.mimeType && file.mimeType.startsWith(type + '/'));
+          }
+
           // Sort results before pagination
           results = sortFiles(results, sortBy, sortOrder);
 
@@ -602,6 +607,11 @@ app.get('/api/search', (req, res) => {
       // Non-recursive search - only search in the current directory
       searchFilesInDirectory(searchPath, query, basePath)
         .then(results => {
+          // Filter by type if specified
+          if (type && ['image', 'audio', 'video'].includes(type)) {
+            results = results.filter(file => file.mimeType && file.mimeType.startsWith(type + '/'));
+          }
+
           // Sort results before pagination
           results = sortFiles(results, sortBy, sortOrder);
 
@@ -2167,7 +2177,6 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
 });
 
 
-
 app.get('/api/index-status', (req, res) => {
   if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
     const status = csharpIndexer.getStatus();
@@ -2330,6 +2339,7 @@ app.post('/api/csharp-indexer/restart', writePermissionMiddleware, async (req, r
   }
 });
 
+
 function handleMediaFilesRequest(req, res, mediaType, isRecursive, dir, page, limit, sortBy, sortOrder) {
   const basePath = path.resolve(config.baseDirectory);
   const searchPath = path.join(basePath, dir);
@@ -2442,7 +2452,8 @@ async function searchFiles(dir, query, basePath) {
       const fullPath = path.join(dir, file);
       const stats = fs.statSync(fullPath);
 
-      if (file.toLowerCase().includes(query.toLowerCase())) {
+      // if (file.toLowerCase().includes(query.toLowerCase())) {
+      if (path.basename(file).toLowerCase().includes(query.toLowerCase())) {
         const fileDetail = {
           name: file,
           path: utils.normalizePath(path.relative(basePath, fullPath)),
@@ -2516,7 +2527,8 @@ async function searchFilesInDirectory(dir, query, basePath) {
       const fullPath = path.join(dir, file);
       const stats = fs.statSync(fullPath);
 
-      if (file.toLowerCase().includes(query.toLowerCase())) {
+      // if (file.toLowerCase().includes(query.toLowerCase())) {
+      if (path.basename(file).toLowerCase().includes(query.toLowerCase())) {
         const mimeType = await utils.getFileType(fullPath);
         results.push({
           name: file,

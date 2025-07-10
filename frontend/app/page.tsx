@@ -109,6 +109,8 @@ function FileExplorerContent() {
 
   const [focusedFileIndex, setFocusedFileIndex] = useState<number | null>(null);
 
+  const [isDirectionMenuVisible, setIsDirectionMenuVisible] = useState(false);
+
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -132,14 +134,7 @@ function FileExplorerContent() {
   const canGoBack = currentPath !== '' || isSearching;
 
 
-  const [isImageOnlyMode, setIsImageOnlyModeTemp] = useState(false);
-  const setIsImageOnlyMode = (mode: boolean) => {
-    if (isSearching && mode) {
-      // Can't use image-only mode with search
-      return;
-    }
-    setIsImageOnlyModeTemp(mode);
-  }
+  const [isImageOnlyMode, setIsImageOnlyMode] = useState(false);
   const isImageOnlyModeRef = useRef(isImageOnlyMode);
 
   const [isSelecting, setIsSelecting] = useState(false);
@@ -268,22 +263,25 @@ function FileExplorerContent() {
 
       if (isSearching && searchQuery.length > 0) {
         // Search mode
+        const searchParams: any = {
+          query: searchQuery,
+          dir: currentPath,
+          sortBy,
+          sortOrder,
+          recursive: recursiveSearch ? 'true' : 'false'
+        };
+
+        if (isImageOnlyMode) {
+          searchParams.type = 'image';
+        }
+
+        if (usePagination) {
+          searchParams.page = page;
+          searchParams.limit = PAGE_SIZE;
+        }
+
         response = await axios.get('/api/search', {
-          params: usePagination ? {
-            query: searchQuery,
-            dir: currentPath,
-            page: page,
-            limit: PAGE_SIZE,
-            sortBy,
-            sortOrder,
-            recursive: recursiveSearch ? 'true' : 'false'
-          } : {
-            query: searchQuery,
-            dir: currentPath,
-            sortBy,
-            sortOrder,
-            recursive: recursiveSearch ? 'true' : 'false'
-          }
+          params: searchParams
         });
         return {
           files: response.data.results,
@@ -616,9 +614,6 @@ function FileExplorerContent() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isImageOnlyMode) {
-      setIsImageOnlyMode(false);
-    }
     const formData = new FormData(e.target as HTMLFormElement);
     const query = formData.get('searchQuery') as string;
     navigateTo(currentPath, query);
@@ -1482,9 +1477,7 @@ function FileExplorerContent() {
           break;
         case 'i': // Image view
           if (e.shiftKey) { // Shift+I switch to image only mode
-            if (!isSearching) {
-              setIsImageOnlyMode(!isImageOnlyMode);
-            }
+            setIsImageOnlyMode(!isImageOnlyMode);
           } else {
             setViewMode('image');
           }
@@ -1932,7 +1925,11 @@ function FileExplorerContent() {
       }}
       onClick={() => setFocusedFileIndex(null)}
       onDoubleClick={handleDoubleClick}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(e) => {
+        if (isDirectionMenuVisible) {
+          e.preventDefault();
+        }
+      }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -2170,7 +2167,6 @@ function FileExplorerContent() {
                 className={cn(
                   "max-md:hidden",
                   "text-yellow-500 hover:text-white hover:bg-yellow-500/20",
-                  isSearching && 'hidden',
                   isImageOnlyMode && 'text-white bg-yellow-600/20 hover:bg-yellow-400/50'
                 )}
               >
@@ -2935,37 +2931,40 @@ function FileExplorerContent() {
       </main>
 
       {/* Direction Menu for view mode selection */}
-      {useDirectionMenu && <DirectionMenu
-        topNode={
-          <div className="flex flex-col items-center">
-            <Grid3x3Icon size={24} />
-            <span className="text-xs mt-1">Grid</span>
-          </div>
-        }
-        rightNode={
-          <div className="flex flex-col items-center">
-            <ImageIcon size={24} />
-            <span className="text-xs mt-1">Image</span>
-          </div>
-        }
-        bottomNode={
-          <div className="flex flex-col items-center">
-            <ImageIcon size={24} className={isImageOnlyMode ? 'text-yellow-500' : ''} />
-            <span className="text-xs mt-1">Image Only</span>
-          </div>
-        }
-        leftNode={
-          <div className="flex flex-col items-center">
-            <ListIcon size={24} />
-            <span className="text-xs mt-1">List</span>
-          </div>
-        }
-        onTopAction={() => setViewMode('grid')}
-        onRightAction={() => setViewMode('image')}
-        onBottomAction={() => setIsImageOnlyMode(!isImageOnlyMode)}
-        onLeftAction={() => setViewMode('list')}
-        centerLabel="View"
-      />}
+      {useDirectionMenu && (
+        <DirectionMenu
+          topNode={
+            <div className="flex flex-col items-center">
+              <Grid3x3Icon size={24} />
+              <span className="text-xs mt-1">Grid</span>
+            </div>
+          }
+          rightNode={
+            <div className="flex flex-col items-center">
+              <ImageIcon size={24} />
+              <span className="text-xs mt-1">Image</span>
+            </div>
+          }
+          bottomNode={
+            <div className="flex flex-col items-center">
+              <ImageIcon size={24} className={isImageOnlyMode ? 'text-yellow-500' : ''} />
+              <span className="text-xs mt-1">Image Only</span>
+            </div>
+          }
+          leftNode={
+            <div className="flex flex-col items-center">
+              <ListIcon size={24} />
+              <span className="text-xs mt-1">List</span>
+            </div>
+          }
+          onTopAction={() => setViewMode('grid')}
+          onRightAction={() => setViewMode('image')}
+          onBottomAction={() => setIsImageOnlyMode(!isImageOnlyMode)}
+          onLeftAction={() => setViewMode('list')}
+          centerLabel="View"
+          onVisibilityChange={setIsDirectionMenuVisible}
+        />
+      )}
     </div>
   );
 }

@@ -11,6 +11,7 @@ interface DirectionMenuProps {
   onBottomAction: () => void;
   onLeftAction: () => void;
   centerLabel?: string;
+  onVisibilityChange?: (visible: boolean) => void;
 }
 
 export interface DirectionMenuHandle {
@@ -26,7 +27,8 @@ export const DirectionMenu = forwardRef<DirectionMenuHandle, DirectionMenuProps>
   onRightAction,
   onBottomAction,
   onLeftAction,
-  centerLabel = "Menu"
+  centerLabel = "Menu",
+  onVisibilityChange
 }, ref) => {
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -56,12 +58,18 @@ export const DirectionMenu = forwardRef<DirectionMenuHandle, DirectionMenuProps>
     }
   }));
 
+  // Add effect to call onVisibilityChange when isVisible changes
+  useEffect(() => {
+    onVisibilityChange?.(isVisible);
+  }, [isVisible, onVisibilityChange]);
+
   const handleRightMouseDown = (e: MouseEvent) => {
     if (e.button !== 2) return;
 
     isMouseDown.current = true;
     startPosition.current = { x: e.clientX, y: e.clientY };
     visibleTimeoutRef.current = setTimeout(() => {
+      e.preventDefault(); // Only prevent default after the timeout
       setPosition({
         x: e.clientX - 100, // 100 is half the width of the menu (200px)
         y: e.clientY - 100  // 100 is half the height of the menu (200px)
@@ -73,6 +81,7 @@ export const DirectionMenu = forwardRef<DirectionMenuHandle, DirectionMenuProps>
   const handleMouseMove = (e: MouseEvent) => {
     if (!isVisible) return;
 
+    e.preventDefault(); // Prevent default only when menu is visible
     const dx = e.clientX - startPosition.current.x;
     const dy = e.clientY - startPosition.current.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -97,18 +106,23 @@ export const DirectionMenu = forwardRef<DirectionMenuHandle, DirectionMenuProps>
   const handleRightMouseUp = (e: MouseEvent) => {
     if (e.button !== 2) return;
 
-    if (!isVisible && visibleTimeoutRef.current) {
+    // Clear the timeout if it exists
+    if (visibleTimeoutRef.current) {
       clearTimeout(visibleTimeoutRef.current);
       visibleTimeoutRef.current = null;
-      setIsVisible(false);
-      updateSelectedDirection(null);
+    }
+
+    // If menu was not shown, don't prevent default behavior
+    if (!isVisible) {
       isMouseDown.current = false;
       return;
     }
 
+    e.preventDefault(); // Prevent default only if menu was shown
+
     const currentDirection = selectedDirectionRef.current;
 
-    if (isVisible && currentDirection) {
+    if (currentDirection) {
       switch (currentDirection) {
         case 'left':
           onLeftAction();

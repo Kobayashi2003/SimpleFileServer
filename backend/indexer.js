@@ -265,7 +265,7 @@ function deleteFromIndex(filePath) {
 }
 
 
-function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOrder = 'asc', recursive = true) {
+function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOrder = 'asc', recursive = true, type = null) {
   if (!db) return { results: [], total: 0, hasMore: false };
 
   try {
@@ -290,14 +290,22 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
       }
     }
 
+    // Build file type condition
+    let typeCondition = '';
+    let typeParams = [];
+    if (type && ['image', 'audio', 'video'].includes(type)) {
+      typeCondition = " AND mimeType LIKE ?";
+      typeParams = [`${type}/%`];
+    }
+
     // Prepare the SQL count query based on recursive flag
     let countSql, countParams;
     if (recursive) {
-      countSql = SQL.SEARCH_FILES_COUNT;
-      countParams = [searchTerm, searchTerm, dirPath, dirPath];
+      countSql = SQL.SEARCH_FILES_COUNT + typeCondition;
+      countParams = [searchTerm, searchTerm, dirPath, dirPath, ...typeParams];
     } else {
-      countSql = SQL.SEARCH_FILES_COUNT_NON_RECURSIVE;
-      countParams = [searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern];
+      countSql = SQL.SEARCH_FILES_COUNT_NON_RECURSIVE + typeCondition;
+      countParams = [searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
     }
 
     // Get total count for pagination info
@@ -318,9 +326,9 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
       // Prepare the paginated query based on recursive flag
       let paginatedQuery;
       if (recursive) {
-        paginatedQuery = `${SQL.SEARCH_FILES} `;
+        paginatedQuery = `${SQL.SEARCH_FILES} ${typeCondition} `;
       } else {
-        paginatedQuery = `${SQL.SEARCH_FILES_NON_RECURSIVE} `;
+        paginatedQuery = `${SQL.SEARCH_FILES_NON_RECURSIVE} ${typeCondition} `;
       }
 
       // Add ordering based on sortBy and sortOrder parameters
@@ -331,10 +339,10 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
 
       if (recursive) {
         results = db.prepare(paginatedQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, limitNum, offset);
+          .all(searchTerm, searchTerm, dirPath, dirPath, ...typeParams, limitNum, offset);
       } else {
         results = db.prepare(paginatedQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, limitNum, offset);
+          .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams, limitNum, offset);
       }
 
       // Check if there are more results
@@ -343,9 +351,9 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
       // Backward compatibility: return all results if no pagination specified
       let fullQuery;
       if (recursive) {
-        fullQuery = `${SQL.SEARCH_FILES} `;
+        fullQuery = `${SQL.SEARCH_FILES} ${typeCondition} `;
       } else {
-        fullQuery = `${SQL.SEARCH_FILES_NON_RECURSIVE} `;
+        fullQuery = `${SQL.SEARCH_FILES_NON_RECURSIVE} ${typeCondition} `;
       }
 
       // Add ordering based on sortBy and sortOrder parameters
@@ -353,10 +361,10 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
 
       if (recursive) {
         results = db.prepare(fullQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath);
+          .all(searchTerm, searchTerm, dirPath, dirPath, ...typeParams);
       } else {
         results = db.prepare(fullQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern);
+          .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams);
       }
     }
 
@@ -378,7 +386,7 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
 /**
  * Generic function to find files in index
  * @param {string} directory - Base directory to search in
- * @param {string} fileType - Type of files to find ('image'|'video'|'audio'|'text'|'all')
+ * @param {string} fileType - Type of files to find ('image'|'video'|'audio'|'all')
  * @param {object} options - Search options
  * @returns {object} Files, total count and pagination info
  */
@@ -421,9 +429,6 @@ function findFilesInIndex(directory = '', fileType = 'all', options = {}) {
         break;
       case 'audio':
         fileTypeCondition = "AND mimeType LIKE 'audio/%'";
-        break;
-      case 'text':
-        fileTypeCondition = "AND mimeType LIKE 'text/%'";
         break;
       default:
         fileTypeCondition = '';

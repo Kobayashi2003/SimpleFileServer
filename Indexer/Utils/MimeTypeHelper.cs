@@ -7,6 +7,13 @@ public class MimeTypeHelper
 {
     private readonly ILogger<MimeTypeHelper> _logger;
 
+    private static readonly Dictionary<string, string> PriorityMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { ".psd", "image/vnd.adobe.photoshop" },
+        { ".cbr", "application/cbr" },
+        { ".cbz", "application/cbz" },
+    };
+
     public MimeTypeHelper(ILogger<MimeTypeHelper> logger)
     {
         _logger = logger;
@@ -16,7 +23,15 @@ public class MimeTypeHelper
     {
         try
         {
-            // Use MimeKit to detect MIME type
+            var extension = Path.GetExtension(filePath);
+            
+            if (!string.IsNullOrEmpty(extension) && PriorityMimeTypes.TryGetValue(extension, out var priorityMimeType))
+            {
+                _logger.LogDebug("Found priority MIME type for {FilePath} (extension: {Extension}): {MimeType}", 
+                    filePath, extension, priorityMimeType);
+                return priorityMimeType;
+            }
+
             var mimeType = MimeTypes.GetMimeType(filePath);
             
             _logger.LogDebug("Detected MIME type for {FilePath}: {MimeType}", filePath, mimeType);
@@ -33,4 +48,4 @@ public class MimeTypeHelper
     {
         return await Task.FromResult(GetMimeType(filePath));
     }
-} 
+}

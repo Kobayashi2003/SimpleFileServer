@@ -4,11 +4,18 @@ import React, { useState, useEffect, useRef, MouseEvent, TouchEvent } from 'reac
 import type { Rendition, NavItem } from 'epubjs';
 import { ReactReader, ReactReaderStyle, type IReactReaderStyle } from 'react-reader';
 import { cn } from "@/lib/utils";
-import { Settings, ArrowRightToLine, ArrowLeftToLine, Search, Sun, Moon, RotateCcw, MousePointer, Menu, Ban, Pointer, PointerOff, Type, GripHorizontal } from 'lucide-react';
+import { 
+  Settings, ArrowRightToLine, ArrowLeftToLine, Search, Sun, Moon, 
+  RotateCcw, MousePointer, Menu, Ban, Pointer, PointerOff, Type, 
+  GripHorizontal, X, Download, Maximize, Minimize
+} from 'lucide-react';
 
 interface EPUBReaderProps {
   src: string;
   className?: string;
+  onClose?: () => void;
+  onDownload?: () => void;
+  onFullScreenChange?: (isFullScreen: boolean) => void;
 }
 
 type SearchResult = { cfi: string; excerpt: string };
@@ -63,6 +70,9 @@ const darkReaderTheme: IReactReaderStyle = {
 export const EPUBReader = ({
   src,
   className,
+  onClose,
+  onDownload,
+  onFullScreenChange,
 }: EPUBReaderProps) => {
 
   const [isMounted, setIsMounted] = useState(false);
@@ -80,6 +90,9 @@ export const EPUBReader = ({
   const [pageInfo, setPageInfo] = useState('');
   const [pageTurnOnScroll, setPageTurnOnScroll] = useState(true);
   const [disableContextMenu, setDisableContextMenu] = useState(false);
+  const [showDownload, setShowDownload] = useState(true);
+  const [showFullscreen, setShowFullscreen] = useState(true);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -124,6 +137,8 @@ export const EPUBReader = ({
     setSwipeable(loadSetting('epub-swipeable', false, value => value === 'true'));
     setDisableContextMenu(loadSetting('epub-disablecontextmenu', false, value => value === 'true'));
     setFontFamily(loadSetting('epub-fontfamily', 'Default' as FontFamily));
+    setShowDownload(loadSetting('epub-showdownload', true, value => value === 'true'));
+    setShowFullscreen(loadSetting('epub-showfullscreen', true, value => value === 'true'));
   }, [src]);
 
   const handleTocChanged = (toc: NavItem[]) => {
@@ -541,6 +556,38 @@ export const EPUBReader = ({
     localStorage.setItem('epub-disablecontextmenu', newValue.toString());
   };
 
+  const toggleShowDownload = () => {
+    const newValue = !showDownload;
+    setShowDownload(newValue);
+    localStorage.setItem('epub-showdownload', newValue.toString());
+  };
+
+  const toggleShowFullscreen = () => {
+    const newValue = !showFullscreen;
+    setShowFullscreen(newValue);
+    localStorage.setItem('epub-showfullscreen', newValue.toString());
+  };
+
+  const handleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      // Enter fullscreen
+      document.documentElement.requestFullscreen().then(() => {
+        setIsFullScreen(true);
+        onFullScreenChange?.(true);
+      }).catch((err) => {
+        console.error('Error attempting to enable fullscreen:', err);
+      });
+    } else {
+      // Exit fullscreen
+      document.exitFullscreen().then(() => {
+        setIsFullScreen(false);
+        onFullScreenChange?.(false);
+      }).catch((err) => {
+        console.error('Error attempting to exit fullscreen:', err);
+      });
+    }
+  };
+
   const applyFontFamily = (rendition: Rendition) => {
     let fontFamilyValue: string;
 
@@ -665,10 +712,84 @@ export const EPUBReader = ({
     renditionRef.current?.prev();
   }
 
+  const handleKeyPress = (event?: KeyboardEvent) => {
+    if (!event) return;
+
+    if (event.target instanceof HTMLInputElement || 
+        event.target instanceof HTMLTextAreaElement ||
+        (showSearch && searchBoxRef.current?.contains(event.target as Node))) {
+      return;
+    }
+
+    switch (event.key) {
+      case 'ArrowRight':
+        event.preventDefault();
+        isRTL ? goPrev() : goNext();
+        break;
+      case 'ArrowLeft':
+        event.preventDefault();
+        isRTL ? goNext() : goPrev();
+        break;
+    }
+  };
+
   // Handle keyboard events
   useEffect(() => {
     if (!isMounted) return;
-  }, [isMounted]);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check if we're in an input field or search box
+      if (e.target instanceof HTMLInputElement || 
+          e.target instanceof HTMLTextAreaElement ||
+          (showSearch && searchBoxRef.current?.contains(e.target as Node))) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'f':
+          e.preventDefault();
+          handleFullScreen();
+          break;
+        case 'escape':
+          if (isFullScreen) {
+            e.preventDefault();
+            handleFullScreen();
+          } else {
+            onClose?.();
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMounted, showSearch, handleFullScreen]);
+
+  // Listen for browser fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).msFullscreenElement
+      );
+      
+      if (isFullscreen !== isFullScreen) {
+        setIsFullScreen(isFullscreen);
+        onFullScreenChange?.(isFullscreen);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('msfullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('msfullscreenchange', handleFullscreenChange);
+    };
+  }, [isFullScreen, onFullScreenChange]);
 
   return (
     <div className={cn("h-full w-full relative", className)}>
@@ -697,12 +818,24 @@ export const EPUBReader = ({
           pageTurnOnScroll={pageTurnOnScroll}
           swipeable={swipeable}
           contextLength={30}
+          handleKeyPress={handleKeyPress}
         />
       </div>
 
       <div className={cn("absolute bottom-4 left-4 p-2 text-sm rounded-md z-10", darkMode ? "bg-black/70 text-white" : "bg-white/70 text-black")}>
         {pageInfo}
       </div>
+
+      {/* Close button in top right corner */}
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-20 bg-black/80 text-white p-2 rounded-full hover:bg-black/90 transition-colors"
+          aria-label="Close"
+        >
+          <X size={20} />
+        </button>
+      )}
 
       {showSearch && (
         <div
@@ -803,6 +936,28 @@ export const EPUBReader = ({
           <Search size={20} />
         </button>
 
+        {/* Download button */}
+        {showDownload && onDownload && (
+          <button
+            onClick={onDownload}
+            className="bg-black text-white p-2 rounded-full hover:bg-gray-800"
+            aria-label="Download"
+          >
+            <Download size={20} />
+          </button>
+        )}
+
+        {/* Fullscreen button */}
+        {showFullscreen && (
+          <button
+            onClick={handleFullScreen}
+            className="bg-black text-white p-2 rounded-full hover:bg-gray-800"
+            aria-label={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+          >
+            {isFullScreen ? <Minimize size={20} /> : <Maximize size={20} />}
+          </button>
+        )}
+
         <button
           onClick={() => {
             setShowSettings(!showSettings);
@@ -815,7 +970,7 @@ export const EPUBReader = ({
         </button>
 
         {showSettings && (
-          <div className="absolute bottom-full right-0 mb-2 bg-black/80 text-white backdrop-blur-sm p-4 rounded-lg min-w-[250px]">
+          <div className="absolute bottom-0 right-full mr-2 bg-black/80 text-white backdrop-blur-sm p-4 rounded-lg min-w-[250px]">
             <div className="grid gap-3">
               {/* Font Size */}
               <div className="flex justify-between items-center">
@@ -932,6 +1087,36 @@ export const EPUBReader = ({
                   className="w-12 h-6 rounded-full relative bg-gray-700 flex items-center px-1"
                 >
                   <div className={`w-4 h-4 rounded-full bg-white absolute transition-all ${!disableContextMenu ? "translate-x-6" : "translate-x-0"}`} />
+                  <Ban size={12} className="ml-0.5 mr-auto" />
+                </button>
+              </div>
+
+              {/* Show Download Button */}
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Download size={16} className={showDownload ? "text-white" : "text-gray-400"} />
+                  <span className="text-sm">Download Button</span>
+                </div>
+                <button
+                  onClick={toggleShowDownload}
+                  className="w-12 h-6 rounded-full relative bg-gray-700 flex items-center px-1"
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white absolute transition-all ${showDownload ? "translate-x-6" : "translate-x-0"}`} />
+                  <Ban size={12} className="ml-0.5 mr-auto" />
+                </button>
+              </div>
+
+              {/* Show Fullscreen Button */}
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Maximize size={16} className={showFullscreen ? "text-white" : "text-gray-400"} />
+                  <span className="text-sm">Fullscreen Button</span>
+                </div>
+                <button
+                  onClick={toggleShowFullscreen}
+                  className="w-12 h-6 rounded-full relative bg-gray-700 flex items-center px-1"
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white absolute transition-all ${showFullscreen ? "translate-x-6" : "translate-x-0"}`} />
                   <Ban size={12} className="ml-0.5 mr-auto" />
                 </button>
               </div>

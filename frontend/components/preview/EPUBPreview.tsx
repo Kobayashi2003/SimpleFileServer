@@ -22,24 +22,13 @@ export const EPUBPreview: React.FC<EPUBPreviewProps> = ({
   return (
     <PreviewBase
       controls={{
-        showClose: true,
         enableBackdropClose: true,
-
-        showDownload: true,
-
-        showFullscreen: true,
-        useBrowserFullscreenAPI: true,
-
         preventBrowserZoom: true,
         preventPinchZoom: true,
         preventDrag: true,
         preventBrowserNavigation: true,
         preventPullToRefresh: true,
-
         ...controls
-      }}
-      callbacks={{
-        onFullScreenChange: setIsFullScreen,
       }}
       {...restProps}
       title={""}
@@ -50,6 +39,9 @@ export const EPUBPreview: React.FC<EPUBPreviewProps> = ({
         className={cn(
           isFullScreen ? "w-screen h-screen" : "w-[90vw] h-[90vh]"
         )}
+        onClose={controls?.onClose}
+        onDownload={controls?.onDownload}
+        onFullScreenChange={setIsFullScreen}
       />
     </PreviewBase>
   );

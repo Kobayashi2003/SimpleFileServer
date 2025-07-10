@@ -345,7 +345,7 @@ export const PreviewBase: React.FC<PreviewBaseProps> = ({
     }
 
     // Handle wheel navigation if enabled
-    if (enableWheelNavigation) {
+    if (!e.ctrlKey && enableWheelNavigation) {
       e.stopPropagation();
 
       if (e.deltaY > 0) {
@@ -647,12 +647,6 @@ export const PreviewBase: React.FC<PreviewBaseProps> = ({
       });
     }
 
-    // Prevent pull-to-refresh
-    if (controls.preventPullToRefresh) {
-      containerElement.style.overscrollBehavior = 'none';
-      document.body.style.overflow = 'hidden';
-    }
-
     // Remove touch delay
     if (controls.removeTouchDelay) {
       containerElement.style.touchAction = 'manipulation';
@@ -691,11 +685,6 @@ export const PreviewBase: React.FC<PreviewBaseProps> = ({
         });
       }
 
-      if (controls.preventPullToRefresh) {
-        containerElement.style.overscrollBehavior = '';
-        document.body.style.overflow = '';
-      }
-
       if (controls.removeTouchDelay) {
         containerElement.style.touchAction = '';
       }
@@ -725,9 +714,10 @@ export const PreviewBase: React.FC<PreviewBaseProps> = ({
 
   // !!!IMPORTANT!!!: If you are running this app in development mode, you should comment out this useEffect.
 
-  // Handle browser back button to close preview
+  // Handle browser back button to close preview - only in production
   useEffect(() => {
-    if (!onClose) return;
+    // Skip in development mode
+    if (process.env.NODE_ENV === 'development' || !onClose) return;
     
     // Add a new history entry when preview opens
     history.pushState({ preview: true }, '', window.location.href);

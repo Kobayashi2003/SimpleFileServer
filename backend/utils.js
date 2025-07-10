@@ -45,6 +45,7 @@ function getFileTypeByExt(extension) {
     // Video
     '.mp4': 'video/mp4',
     '.mkv': 'video/x-matroska',
+    '.mov': 'video/quicktime',
 
     // Audio
     '.mp3': 'audio/mpeg',

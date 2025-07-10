@@ -22,15 +22,14 @@ interface ImagePreviewProps extends Omit<PreviewBaseProps, 'children' | 'onZoomI
 export const ImagePreview: React.FC<ImagePreviewProps> = ({
   src,
   alt = "Preview",
-  initialZoom = 1,
   maxZoom = 5,
-  minZoom = 0.5,
+  minZoom = 1,
   zoomStep = 0.5,
   controls,
   ...restProps
 }) => {
   // Internal state for zoom and position
-  const [zoom, setZoom] = useState(initialZoom);
+  const [zoom, setZoom] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -107,10 +106,9 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
 
     checkIfCached();
     setHasError(false);
-    setZoom(initialZoom);
     setPosition({ x: 0, y: 0 });
     setIsDragging(false);
-  }, [src, initialZoom]);
+  }, [src]);
 
   // Add a timeout to prevent infinite loading
   useEffect(() => {
@@ -123,6 +121,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
 
     return () => clearTimeout(timeoutId);
   }, [src, isLoading]);
+
 
 
   // Zoom handlers
@@ -139,55 +138,90 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
     setPosition({ x: 0, y: 0 });
   }, []);
 
-  // Calculate bounds for the image based on zoom level and dimensions
-  const getBounds = useCallback(() => {
+
+
+  // Constrain position within bounds
+  const constrainPosition = useCallback((pos: { x: number, y: number }) => {
     if (!imageRef.current || !containerRef.current) {
-      return { minX: -Infinity, maxX: Infinity, minY: -Infinity, maxY: Infinity };
+      return pos;
     }
 
     const img = imageRef.current;
     const container = containerRef.current;
 
-    // Calculate the scaled dimensions of the image
-    const scaledWidth = img.naturalWidth * zoom;
-    const scaledHeight = img.naturalHeight * zoom;
-
-    // Get container dimensions
+    // Get container dimensions and center point
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
+    const centerX = containerWidth / 2;
+    const centerY = containerHeight / 2;
 
-    // If the image is smaller than the container (even with zoom), center it
-    if (scaledWidth <= containerWidth) {
-      // No horizontal movement allowed, just keep it centered
-      const centerX = 0;
-      return {
-        minX: centerX,
-        maxX: centerX,
-        minY: -Math.max(0, (scaledHeight - containerHeight) / 2),
-        maxY: Math.max(0, (scaledHeight - containerHeight) / 2)
-      };
-    } else {
-      // Allow horizontal movement within bounds
-      const horizontalExcess = (scaledWidth - containerWidth) / 2;
-      const verticalExcess = Math.max(0, (scaledHeight - containerHeight) / 2);
+    // Get base dimensions from layout size (not affected by transform)
+    const baseWidth = img.offsetWidth;
+    const baseHeight = img.offsetHeight;
 
-      return {
-        minX: -horizontalExcess,
-        maxX: horizontalExcess,
-        minY: -verticalExcess,
-        maxY: verticalExcess
-      };
+    // Calculate scaled dimensions
+    const scaledWidth = baseWidth * zoom;
+    const scaledHeight = baseHeight * zoom;
+
+    // Calculate the offset from center due to scaling
+    const scaleOffsetX = (scaledWidth - baseWidth) / 2;
+    const scaleOffsetY = (scaledHeight - baseHeight) / 2;
+
+    // Calculate current image edges position with the proposed position
+    // Consider that the transform origin is at center
+    const leftEdge = pos.x - scaleOffsetX;
+    const rightEdge = pos.x + baseWidth + scaleOffsetX;
+    const topEdge = pos.y - scaleOffsetY;
+    const bottomEdge = pos.y + baseHeight + scaleOffsetY;
+
+    // Constrain each edge to not cross the center
+    let newX = pos.x;
+    let newY = pos.y;
+
+    // Constrain horizontal position
+    if (leftEdge > centerX) {
+      newX = centerX + scaleOffsetX; // Left edge can't go beyond center
     }
+    if (rightEdge < centerX) {
+      newX = centerX - baseWidth - scaleOffsetX; // Right edge can't go beyond center
+    }
+
+    // Constrain vertical position
+    if (topEdge > centerY) {
+      newY = centerY + scaleOffsetY; // Top edge can't go beyond center
+    }
+    if (bottomEdge < centerY) {
+      newY = centerY - baseHeight - scaleOffsetY; // Bottom edge can't go beyond center
+    }
+
+    return { x: newX, y: newY };
   }, [zoom]);
 
-  // Constrain position within bounds
-  const constrainPosition = useCallback((pos: { x: number, y: number }) => {
-    const bounds = getBounds();
-    return {
-      x: Math.min(Math.max(pos.x, bounds.minX), bounds.maxX),
-      y: Math.min(Math.max(pos.y, bounds.minY), bounds.maxY)
+  // Reset position when zoom changes to 1 or less
+  useEffect(() => {
+    if (zoom <= 1) {
+      setPosition({ x: 0, y: 0 });
+    } else {
+      // When zooming in, make sure position stays within bounds
+      setPosition(prev => constrainPosition(prev));
+    }
+  }, [zoom, constrainPosition]);
+
+  // Reapply constraints when window is resized
+  useEffect(() => {
+    const handleResize = () => {
+      if (zoom > 1) {
+        setPosition(prev => constrainPosition(prev));
+      }
     };
-  }, [getBounds]);
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [zoom, constrainPosition]);
+
+
 
   // Handle inertia animation
   const applyInertia = useCallback(() => {
@@ -223,6 +257,17 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
 
     animationRef.current = requestAnimationFrame(applyInertia);
   }, [constrainPosition]);
+
+  // Clean up animation frame on unmount
+  useEffect(() => {
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, []);
+
+
 
   // Handle image mouse events for dragging
   const handleImageMouseDown = useCallback((e: React.MouseEvent<HTMLImageElement>) => {
@@ -280,9 +325,26 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
     }
   }, [isDragging, applyInertia, zoom]);
 
+  // Global mouse up handler
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      if (isDragging) {
+        handleImageMouseUp();
+      }
+    };
+
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isDragging, handleImageMouseUp]);
+
+
+
   // Handle touch events for dragging
   const handleTouchStart = useCallback((e: React.TouchEvent<HTMLImageElement>) => {
     if (zoom <= 1) return;
+    if (e.touches.length > 1) return; // Ignore if more than one touch point
 
     // Cancel any ongoing inertia animation
     if (animationRef.current) {
@@ -303,6 +365,11 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
 
   const handleTouchMove = useCallback((e: React.TouchEvent<HTMLImageElement>) => {
     if (!isDragging) return;
+    if (e.touches.length > 1) {
+      // If a second finger is added during drag, cancel the drag
+      setIsDragging(false);
+      return;
+    }
 
     const touch = e.touches[0];
 
@@ -332,6 +399,8 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
     handleImageMouseUp();
   }, [handleImageMouseUp]);
 
+
+
   const handleFullScreenChange = useCallback((fullScreenState: boolean) => {
     setIsFullScreen(fullScreenState);
 
@@ -341,52 +410,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
     }
   }, [zoom, constrainPosition]);
 
-  // Reset position when zoom changes to 1 or less
-  useEffect(() => {
-    if (zoom <= 1) {
-      setPosition({ x: 0, y: 0 });
-    } else {
-      // When zooming in, make sure position stays within bounds
-      setPosition(prev => constrainPosition(prev));
-    }
-  }, [zoom, constrainPosition]);
 
-  // Reapply constraints when window is resized
-  useEffect(() => {
-    const handleResize = () => {
-      if (zoom > 1) {
-        setPosition(prev => constrainPosition(prev));
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [zoom, constrainPosition]);
-
-  // Global mouse up handler
-  useEffect(() => {
-    const handleGlobalMouseUp = () => {
-      if (isDragging) {
-        handleImageMouseUp();
-      }
-    };
-
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => {
-      window.removeEventListener('mouseup', handleGlobalMouseUp);
-    };
-  }, [isDragging, handleImageMouseUp]);
-
-  // Clean up animation frame on unmount
-  useEffect(() => {
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, []);
 
   const getImageStyles = () => {
     const safeZoom = Math.max(minZoom, Math.min(maxZoom, zoom));
@@ -427,7 +451,7 @@ export const ImagePreview: React.FC<ImagePreviewProps> = ({
         useBrowserFullscreenAPI: true,
         enableFullscreenNavigation: zoom == 1,
         enableFullscreenToolbar: true,
-        
+
         enableHandleKeyboard: true,
         enableBaseHandleKeyboard: true,
 
