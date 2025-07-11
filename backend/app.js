@@ -274,59 +274,45 @@ app.get('/api/bgs', async (req, res) => {
 app.use(authMiddleware);
 
 // Initialize indexing and monitoring systems
-if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
-  console.log('Using C# indexer for file indexing and monitoring...');
-  
-  // Start C# indexer
-  csharpIndexer.start()
-    .then(success => {
-      if (success) {
-        console.log('C# indexer started successfully');
-        console.log('Node.js indexer and watcher are disabled in favor of C# indexer');
-      } else {
-        console.error('Failed to start C# indexer, falling back to Node.js indexer');
-        initializeNodeIndexer();
-      }
-    })
-    .catch(error => {
-      console.error('Error starting C# indexer:', error.message);
-      console.log('Falling back to Node.js indexer');
-      initializeNodeIndexer();
+if (config.useCSharpIndexer) {
+  if (csharpIndexer.isAvailable()) {
+    console.log('Using C# indexer for file indexing and monitoring...');
+    
+    // Start C# indexer
+    csharpIndexer.start()
+      .then(success => {
+        if (success) {
+          console.log('C# indexer started successfully');
+          indexer.initializeDatabase();
+          isIndexingEnabled = true;
+        } else {
+          console.error('Failed to start C# indexer');
+          isIndexingEnabled = false;
+        }
+      })
+      .catch(error => {
+        console.error('Error starting C# indexer:', error.message);
+        isIndexingEnabled = false;
+      });
+
+    // Handle graceful shutdown
+    process.on('SIGTERM', async () => {
+      console.log('Received SIGTERM, shutting down C# indexer...');
+      await csharpIndexer.stop();
+      process.exit(0);
     });
 
-  // Handle graceful shutdown
-  process.on('SIGTERM', async () => {
-    console.log('Received SIGTERM, shutting down C# indexer...');
-    await csharpIndexer.stop();
-    process.exit(0);
-  });
-
-  process.on('SIGINT', async () => {
-    console.log('Received SIGINT, shutting down C# indexer...');
-    await csharpIndexer.stop();
-    process.exit(0);
-  });
-
+    process.on('SIGINT', async () => {
+      console.log('Received SIGINT, shutting down C# indexer...');
+      await csharpIndexer.stop();
+      process.exit(0);
+    });
+  } else {
+    console.error('C# indexer is enabled but executable not found');
+    isIndexingEnabled = false;
+  }
 } else if (config.useFileIndex) {
   console.log('Using Node.js indexer...');
-  initializeNodeIndexer();
-} else {
-  console.log('File indexing is disabled');
-}
-
-// Initialize Node.js file watcher if not using C# indexer
-if (!config.useCSharpIndexer && config.useFileWatcher) {
-  console.log('Initializing Node.js file watcher...');
-  try {
-    watcher.initialize() && watcher.startWatching(config.baseDirectory);
-  } catch (error) {
-    console.error('Error initializing file watcher:', error);
-  } finally {
-    console.log('File watcher initialized');
-  }
-}
-
-function initializeNodeIndexer() {
   console.log('Initializing Node.js file indexer...');
   indexer.initializeDatabase();
 
@@ -341,29 +327,51 @@ function initializeNodeIndexer() {
           console.log(`Errors: ${result.stats.errors}`);
           console.log(`Start time: ${result.stats.startTime}`);
           console.log(`Duration: ${new Date(result.stats.lastUpdated).getTime() - new Date(result.stats.startTime).getTime()}ms`);
+          isIndexingEnabled = true;
         } else {
           console.error('Failed to build file index:', result.message);
+          isIndexingEnabled = false;
         }
       })
       .catch(error => {
         console.error('Error building file index:', error);
+        isIndexingEnabled = false;
       });
   } else {
     const stats = indexer.getIndexStats();
     console.log(`Using existing file index with ${stats.fileCount} files, last built on ${stats.lastBuilt}`);
+    isIndexingEnabled = true;
   }
+} else {
+  console.log('File indexing is disabled');
+  isIndexingEnabled = false;
+}
 
-  // Initialize Node.js file watcher
-  if (config.useFileWatcher) {
-    console.log('Initializing Node.js file watcher...');
-    try {
-      watcher.initialize() && watcher.startWatching(config.baseDirectory);
-    } catch (error) {
-      console.error('Error initializing file watcher:', error);
-    } finally {
-      console.log('File watcher initialized');
-    }
+// Initialize Node.js file watcher only when Node.js indexer is enabled
+if (!config.useCSharpIndexer && config.useFileIndex && config.useFileWatcher) {
+  console.log('Initializing Node.js file watcher...');
+  try {
+    watcher.initialize() && watcher.startWatching(config.baseDirectory);
+  } catch (error) {
+    console.error('Error initializing file watcher:', error);
+  } finally {
+    console.log('File watcher initialized');
   }
+}
+
+// Helper function to check if indexing is available
+function isIndexingAvailable() {
+  if (config.useCSharpIndexer) {
+    return csharpIndexer.isAvailable() && csharpIndexer.getStatus().isRunning && csharpIndexer.isDatabaseBuilt();
+  } else if (config.useFileIndex) {
+    return indexer.isIndexBuilt();
+  }
+  return false;
+}
+
+// Helper function to check if Node.js indexer should be updated on write operations
+function shouldUpdateNodeIndexer() {
+  return !config.useCSharpIndexer && config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt();
 }
 
 app.get('/api/files', async (req, res) => {
@@ -377,7 +385,7 @@ app.get('/api/files', async (req, res) => {
 
   try {
     // Use file index if enabled for files API
-    if (config.useFileIndexForFilesApi && config.useFileIndex && indexer.isIndexBuilt()) {
+    if (config.useFileIndexForFilesApi && isIndexingAvailable()) {
       // Get directory files from index with pagination
       const result = await indexer.getDirectoryFiles(dir, page, limit, sortBy, sortOrder, cover === 'true');
       return res.json({
@@ -560,7 +568,7 @@ app.get('/api/search', (req, res) => {
     const isRecursive = recursive === 'true';
 
     // Use file index if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (isIndexingAvailable()) {
       const searchResult = indexer.searchIndex(query, dir, page, limit, sortBy, sortOrder, isRecursive, type);
       return res.json(searchResult);
     }
@@ -655,7 +663,7 @@ app.get('/api/images/random', (req, res) => {
   const { dir = '' } = req.query;
 
   // Only allow using this endpoint if file index is enabled and built
-  if (!config.useFileIndex || !indexer.isIndexBuilt()) {
+  if (!isIndexingAvailable()) {
     return res.status(400).json({ error: "This endpoint requires the file index to be enabled and built" });
   }
 
@@ -1531,7 +1539,7 @@ app.post('/api/upload', writePermissionMiddleware, (req, res) => {
     }));
 
     // Update indexer if enabled
-    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+    if (shouldUpdateNodeIndexer()) {
       try {
         // Prepare files for indexer in the required format
         const filesForIndex = uploadedFiles.map(file => ({
@@ -1645,7 +1653,7 @@ app.post('/api/upload-folder', writePermissionMiddleware, (req, res) => {
     });
 
     // Update indexer if enabled
-    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+    if (shouldUpdateNodeIndexer()) {
       try {
         // Prepare files for indexer in the required format
         const filesForIndex = uploadedFiles.map(file => ({
@@ -1714,7 +1722,7 @@ app.post('/api/mkdir', writePermissionMiddleware, (req, res) => {
     fs.mkdirSync(fullPath, { recursive: true });
 
     // Update indexer if enabled
-    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+    if (shouldUpdateNodeIndexer()) {
       try {
         const stats = fs.statSync(fullPath);
         const relativePath = path.join(dirPath, dirName).replace(/\\/g, '/');
@@ -1758,7 +1766,7 @@ app.post('/api/rename', writePermissionMiddleware, async (req, res) => {
     fs.renameSync(fullPath, newPath);
 
     // Update indexer if enabled
-    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+    if (shouldUpdateNodeIndexer()) {
       try {
         // Delete the old entry
         indexer.deleteFromIndex(filePath);
@@ -1876,7 +1884,7 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
         const success = utils.safeDeleteDirectory(fullPath);
 
         // Update indexer if enabled
-        if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+        if (shouldUpdateNodeIndexer()) {
           indexer.deleteFromIndex(filePath);
           console.log(`Removed directory "${filePath}" from index`);
         }
@@ -1890,7 +1898,7 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
         fs.unlinkSync(fullPath);
 
         // Update indexer if enabled
-        if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+        if (shouldUpdateNodeIndexer()) {
           indexer.deleteFromIndex(filePath);
           console.log(`Removed file "${filePath}" from index`);
         }
@@ -1924,14 +1932,14 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
           }
 
           // Update indexer if enabled
-          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+          if (shouldUpdateNodeIndexer()) {
             indexer.deleteFromIndex(relativePath);
           }
         } else {
           fs.unlinkSync(fullPath);
 
           // Update indexer if enabled
-          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+          if (shouldUpdateNodeIndexer()) {
             indexer.deleteFromIndex(relativePath);
           }
         }
@@ -1940,7 +1948,7 @@ app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
       }
     }
 
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (shouldUpdateNodeIndexer()) {
       console.log(`Removed ${fullPaths.length} items from index`);
     }
 
@@ -1963,7 +1971,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
       fs.mkdirSync(destDir, { recursive: true });
 
       // Add new directory to index if it didn't exist before
-      if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+      if (shouldUpdateNodeIndexer()) {
         const destStats = fs.statSync(destDir);
         indexer.saveFileBatch([{
           name: path.basename(destination),
@@ -2001,7 +2009,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
           copyFolderRecursiveSync(sourcePath, destPath);
 
           // For indexing, we need to collect all files in the directory
-          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+          if (shouldUpdateNodeIndexer()) {
             // First add the directory itself
             filesToIndex.push({
               name: path.basename(source),
@@ -2027,7 +2035,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
           fs.copyFileSync(sourcePath, destPath);
 
           // Add file to index
-          if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+          if (shouldUpdateNodeIndexer()) {
             const newStats = fs.statSync(destPath);
             // Get file type asynchronously but don't wait for it, add to index after
             utils.getFileType(destPath)
@@ -2053,7 +2061,7 @@ app.post('/api/clone', writePermissionMiddleware, (req, res) => {
     }
 
     // Add non-directory files to index in a batch
-    if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt() && filesToIndex.length > 0) {
+    if (shouldUpdateNodeIndexer() && filesToIndex.length > 0) {
       indexer.saveFileBatch(filesToIndex);
       console.log(`Added ${filesToIndex.length} cloned items to the index`);
     }
@@ -2079,7 +2087,7 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
       fs.mkdirSync(destDir, { recursive: true });
 
       // Add new directory to index if it didn't exist before
-      if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+      if (shouldUpdateNodeIndexer()) {
         const destStats = fs.statSync(destDir);
         indexer.saveFileBatch([{
           name: path.basename(destination),
@@ -2114,7 +2122,7 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
         fs.renameSync(sourcePath, destPath);
 
         // Update index if enabled
-        if (config.useFileIndex && config.updateIndexOnWrite && indexer.isIndexBuilt()) {
+        if (shouldUpdateNodeIndexer()) {
           try {
             // Delete the old entry (and all its children if it's a directory)
             indexer.deleteFromIndex(source);
@@ -2183,12 +2191,7 @@ app.get('/api/index-status', (req, res) => {
     return res.json({
       enabled: true,
       type: 'csharp',
-      isRunning: status.isRunning,
-      processId: status.processId,
-      restartCount: status.restartCount,
-      executablePath: status.executablePath,
-      baseDirectory: status.baseDirectory,
-      databasePath: status.databasePath
+      ...status
     });
   } else if (config.useFileIndex) {
     const stats = indexer.getIndexStats();
@@ -2295,51 +2298,6 @@ app.post('/api/toggle-watcher', writePermissionMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/csharp-indexer-status', (req, res) => {
-  if (!config.useCSharpIndexer) {
-    return res.json({ enabled: false, reason: 'C# indexer is disabled in configuration' });
-  }
-
-  if (!csharpIndexer.isAvailable()) {
-    return res.json({ 
-      enabled: false, 
-      reason: 'C# indexer executable not found',
-      executablePath: config.cSharpIndexerPath
-    });
-  }
-
-  const status = csharpIndexer.getStatus();
-  return res.json({
-    enabled: true,
-    ...status,
-    configuration: {
-      forceRebuild: config.cSharpIndexerForceRebuild,
-      startupTimeout: config.cSharpIndexerStartupTimeout,
-      autoRestart: config.cSharpIndexerAutoRestart,
-      maxRestarts: config.cSharpIndexerMaxRestarts,
-      restartDelay: config.cSharpIndexerRestartDelay
-    }
-  });
-});
-
-app.post('/api/csharp-indexer/restart', writePermissionMiddleware, async (req, res) => {
-  if (!config.useCSharpIndexer || !csharpIndexer.isAvailable()) {
-    return res.status(400).json({ error: "C# indexer is not enabled or available" });
-  }
-
-  try {
-    const success = await csharpIndexer.restart();
-    res.json({ 
-      success, 
-      message: success ? "C# indexer restarted successfully" : "Failed to restart C# indexer",
-      status: csharpIndexer.getStatus()
-    });
-  } catch (error) {
-    res.status(500).json({ error: `Error restarting C# indexer: ${error.message}` });
-  }
-});
-
-
 function handleMediaFilesRequest(req, res, mediaType, isRecursive, dir, page, limit, sortBy, sortOrder) {
   const basePath = path.resolve(config.baseDirectory);
   const searchPath = path.join(basePath, dir);
@@ -2350,7 +2308,7 @@ function handleMediaFilesRequest(req, res, mediaType, isRecursive, dir, page, li
 
   try {
     // Use file index if enabled
-    if (config.useFileIndex && indexer.isIndexBuilt()) {
+    if (isIndexingAvailable()) {
       // For images, use the existing method
       if (mediaType === 'image') {
         const mediaResult = indexer.findImagesInIndex(dir, page, limit, sortBy, sortOrder, isRecursive);
@@ -2746,7 +2704,7 @@ if (!isMainThread) {
 }
 
 async function indexDirectoryRecursively(dirPath, basePath) {
-  if (!config.useFileIndex || !indexer.isIndexBuilt()) return 0;
+  if (!shouldUpdateNodeIndexer()) return 0;
 
   try {
     const fileBatch = [];

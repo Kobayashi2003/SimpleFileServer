@@ -125,48 +125,10 @@ class Program
             }
         }
 
-        // Get database info for display
-        var dbInfo = new FileInfo(dbPath);
-        var dbSizeMB = dbInfo.Length / 1024.0 / 1024.0;
-        
-        Console.WriteLine();
-        Console.WriteLine("+======================================================================+");
-        Console.WriteLine("|                          DATABASE EXISTS                            |");
-        Console.WriteLine("+======================================================================+");
-        Console.WriteLine($"| Path: {dbPath.PadRight(58)} |");
-        Console.WriteLine($"| Size: {dbSizeMB:F2} MB".PadRight(71) + "|");
-        Console.WriteLine($"| Modified: {dbInfo.LastWriteTime:yyyy-MM-dd HH:mm:ss}".PadRight(71) + "|");
-        Console.WriteLine("+======================================================================+");
-        Console.WriteLine("| Building a new index will DELETE the existing database and all its  |");
-        Console.WriteLine("| indexed data. This operation cannot be undone.                      |");
-        Console.WriteLine("+======================================================================+");
-        Console.WriteLine();
-        Console.Write("Do you want to proceed and rebuild the index? (y/N): ");
-        
-        var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-        
-        if (response == "y" || response == "yes")
-        {
-            logger.LogInformation("User confirmed database rebuild, removing existing database...");
-            try
-            {
-                File.Delete(dbPath);
-                Console.WriteLine("[OK] Existing database removed successfully.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to delete existing database: {DbPath}", dbPath);
-                Console.WriteLine("[ERROR] Failed to remove existing database. Check file permissions.");
-                return false;
-            }
-        }
-        else
-        {
-            logger.LogInformation("Index build cancelled by user.");
-            Console.WriteLine("Index build cancelled.");
-            return false;
-        }
+        // In non-force mode, keep the existing database and let FileIndexer decide
+        // whether to rebuild based on metadata
+        logger.LogInformation("Existing database found. FileIndexer will check if rebuild is needed.");
+        return true;
     }
 
     private static string GetDatabasePath()

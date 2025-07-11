@@ -34,6 +34,7 @@ const SQL = {
   `,
 
   GET_LAST_BUILT: "SELECT value FROM metadata WHERE key = 'last_built'",
+  GET_BASE_DIRECTORY: "SELECT value FROM metadata WHERE key = 'base_directory'",
   UPDATE_METADATA: 'INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)',
 
   COUNT_FILES: 'SELECT COUNT(*) as count FROM files',
@@ -41,29 +42,55 @@ const SQL = {
   INSERT OR REPLACE INTO files (name, path, size, mtime, mimeType, isDirectory) 
   VALUES (?, ?, ?, ?, ?, ?)
   `,
+  // SEARCH_FILES: `
+  // SELECT name, path, size, mtime, mimeType, isDirectory 
+  // FROM files 
+  // WHERE (name LIKE ? OR path LIKE ?) 
+  // AND (? = '%' OR path LIKE ?)
+  // `,
+  // SEARCH_FILES_COUNT: `
+  // SELECT COUNT(*) as count 
+  // FROM files 
+  // WHERE (name LIKE ? OR path LIKE ?) 
+  // AND (? = '%' OR path LIKE ?)
+  // `,
+  // SEARCH_FILES_NON_RECURSIVE: `
+  // SELECT name, path, size, mtime, mimeType, isDirectory 
+  // FROM files 
+  // WHERE (name LIKE ? OR path LIKE ?) 
+  // AND (? = '%' OR path LIKE ?)
+  // AND (? IS NULL OR path NOT LIKE ?)
+  // `,
+  // SEARCH_FILES_COUNT_NON_RECURSIVE: `
+  // SELECT COUNT(*) as count 
+  // FROM files 
+  // WHERE (name LIKE ? OR path LIKE ?) 
+  // AND (? = '%' OR path LIKE ?) 
+  // AND (? IS NULL OR path NOT LIKE ?)
+  // `,
   SEARCH_FILES: `
   SELECT name, path, size, mtime, mimeType, isDirectory 
   FROM files 
-  WHERE (name LIKE ? OR path LIKE ?) 
+  WHERE name LIKE ? 
   AND (? = '%' OR path LIKE ?)
   `,
   SEARCH_FILES_COUNT: `
   SELECT COUNT(*) as count 
   FROM files 
-  WHERE (name LIKE ? OR path LIKE ?) 
+  WHERE name LIKE ? 
   AND (? = '%' OR path LIKE ?)
   `,
   SEARCH_FILES_NON_RECURSIVE: `
   SELECT name, path, size, mtime, mimeType, isDirectory 
   FROM files 
-  WHERE (name LIKE ? OR path LIKE ?) 
+  WHERE name LIKE ? 
   AND (? = '%' OR path LIKE ?)
   AND (? IS NULL OR path NOT LIKE ?)
   `,
   SEARCH_FILES_COUNT_NON_RECURSIVE: `
   SELECT COUNT(*) as count 
   FROM files 
-  WHERE (name LIKE ? OR path LIKE ?) 
+  WHERE name LIKE ? 
   AND (? = '%' OR path LIKE ?) 
   AND (? IS NULL OR path NOT LIKE ?)
   `,
@@ -177,8 +204,16 @@ function isIndexBuilt() {
   if (!db) return false;
 
   try {
-    const result = db.prepare(SQL.COUNT_FILES).get();
-    return result.count > 0;
+    // Check if the index has been built by looking for 'last_built' metadata
+    const result = db.prepare(SQL.GET_LAST_BUILT).get();
+    const lastBuilt = result && result.value !== null;
+
+    // Check if base directory matches
+    const baseDirectoryResult = db.prepare(SQL.GET_BASE_DIRECTORY).get();
+    const baseDirectoryMatches = baseDirectoryResult && baseDirectoryResult.value === config.baseDirectory;
+
+    // Index is considered built only if both conditions are met
+    return lastBuilt && baseDirectoryMatches;
   } catch (error) {
     console.error('Error checking if index is built:', error);
     return false;
@@ -222,6 +257,9 @@ function clearIndex() {
 
   try {
     db.prepare(SQL.DELETE_ALL_FILES).run();
+    // Clear all metadata
+    db.prepare(SQL.UPDATE_METADATA).run('last_built', null);
+    db.prepare(SQL.UPDATE_METADATA).run('base_directory', null);
     console.log('Index cleared');
     return true;
   } catch (error) {
@@ -302,10 +340,12 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
     let countSql, countParams;
     if (recursive) {
       countSql = SQL.SEARCH_FILES_COUNT + typeCondition;
-      countParams = [searchTerm, searchTerm, dirPath, dirPath, ...typeParams];
+      // countParams = [searchTerm, searchTerm, dirPath, dirPath, ...typeParams];
+      countParams = [searchTerm, dirPath, dirPath, ...typeParams];
     } else {
       countSql = SQL.SEARCH_FILES_COUNT_NON_RECURSIVE + typeCondition;
-      countParams = [searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
+      // countParams = [searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
+      countParams = [searchTerm, dirPath, dirPath, ...typeParams];
     }
 
     // Get total count for pagination info
@@ -339,10 +379,12 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
 
       if (recursive) {
         results = db.prepare(paginatedQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, ...typeParams, limitNum, offset);
+          // .all(searchTerm, searchTerm, dirPath, dirPath, ...typeParams, limitNum, offset);
+          .all(searchTerm, dirPath, dirPath, ...typeParams, limitNum, offset);
       } else {
         results = db.prepare(paginatedQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams, limitNum, offset);
+          // .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams, limitNum, offset);
+          .all(searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams, limitNum, offset);
       }
 
       // Check if there are more results
@@ -361,10 +403,12 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
 
       if (recursive) {
         results = db.prepare(fullQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, ...typeParams);
+          // .all(searchTerm, searchTerm, dirPath, dirPath, ...typeParams);
+          .all(searchTerm, dirPath, dirPath, ...typeParams);
       } else {
         results = db.prepare(fullQuery)
-          .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams);
+          // .all(searchTerm, searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams);
+          .all(searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams);
       }
     }
 
@@ -459,7 +503,7 @@ function findFilesInIndex(directory = '', fileType = 'all', options = {}) {
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 100;
       const offset = (pageNum - 1) * limitNum;
-      
+
       mainQuery += ' LIMIT ? OFFSET ?';
       queryParams.push(limitNum, offset);
       hasMore = offset + limitNum < totalCount;
@@ -1449,9 +1493,10 @@ async function buildIndex(basePath) {
       { processed: 0, errors: 0 }
     );
 
-    // Update the last build time
+    // Update the metadata
     const completionTime = new Date().toISOString();
     db.prepare(SQL.UPDATE_METADATA).run('last_built', completionTime);
+    db.prepare(SQL.UPDATE_METADATA).run('base_directory', basePath);
 
     // Ensure all writes are completed
     db.pragma('wal_checkpoint(FULL)');

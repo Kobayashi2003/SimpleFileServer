@@ -157,6 +157,32 @@ public class IndexDatabase : IDisposable
         }
     }
 
+    public void ClearIndex()
+    {
+        using var transaction = _connection.BeginTransaction();
+        try
+        {
+            // Clear all files
+            using var deleteFilesCommand = _connection.CreateCommand();
+            deleteFilesCommand.CommandText = "DELETE FROM files";
+            deleteFilesCommand.ExecuteNonQuery();
+
+            // Clear the 'last_built' metadata to indicate the index is no longer built
+            using var updateMetadataCommand = _connection.CreateCommand();
+            updateMetadataCommand.CommandText = "DELETE FROM metadata WHERE key = 'last_built'";
+            updateMetadataCommand.ExecuteNonQuery();
+
+            transaction.Commit();
+            _logger.LogInformation("Index cleared successfully");
+        }
+        catch (Exception ex)
+        {
+            transaction.Rollback();
+            _logger.LogError(ex, "Error clearing index");
+            throw;
+        }
+    }
+
     public FileEntry? GetEntry(string fullPath)
     {
         using var command = _connection.CreateCommand();

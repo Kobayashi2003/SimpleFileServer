@@ -9,7 +9,7 @@ const crypto = require('crypto');
 process.env.NO_CONFIG_WARNING = 'true';
 process.env.SUPPRESS_NO_CONFIG_WARNING = 'true';
 
-const BASE_DIR = process.env.BASE_DIRECTORY || 'D:/Temp';
+const BASE_DIR = process.env.BASE_DIRECTORY || 'example';
 const TMP_DIR = path.join(os.tmpdir(), 'simple-file-server');
 
 const config = {
@@ -93,24 +93,29 @@ const config = {
   userRules: process.env.USER_RULES ?
     process.env.USER_RULES.split(',').map(rule => rule.trim())
     : [
-      'admin|admin123|rw',
-      'guest|guest123|r'
+      // 'admin|admin123|rw',
+      // 'guest|guest123|r'
     ],
 
 
 
-  // *** File indexing options 
+  // *** File indexing common options
   // **************************************************
-  // Enable file indexing for faster search and browsing
-  useFileIndex: process.env.USE_FILE_INDEX === 'true' || false,
-  // Whether to use file index for /api/files endpoint (requires useFileIndex to be true)
-  useFileIndexForFilesApi: process.env.USE_FILE_INDEX_FOR_FILES_API === 'true' || false,
-  // Whether to update index during write operations (upload, delete, rename, move, clone, mkdir)
-  updateIndexOnWrite: process.env.UPDATE_INDEX_ON_WRITE === 'true' || false,
   // Path to the SQLite database file for storing file index
   fileIndexPath: process.env.FILE_INDEX_PATH || path.join(TMP_DIR,
     crypto.createHash('sha256').update(BASE_DIR.endsWith('/') ? BASE_DIR.slice(0, -1) : BASE_DIR).digest('hex') + '.db'
   ),
+  // Whether to use file index for /api/files endpoint (requires useFileIndex to be true)
+  useFileIndexForFilesApi: process.env.USE_FILE_INDEX_FOR_FILES_API === 'true' || false,
+
+
+
+  // *** File Node.js Indexing options 
+  // **************************************************
+  // Enable file indexing for faster search and browsing
+  useFileIndex: process.env.USE_FILE_INDEX === 'true' || false,
+  // Whether to update index during write operations (upload, delete, rename, move, clone, mkdir)
+  updateIndexOnWrite: process.env.UPDATE_INDEX_ON_WRITE === 'true' || false,
   // Rebuild file index on server startup
   rebuildIndexOnStartup: process.env.REBUILD_INDEX_ON_STARTUP === 'true' || false,
   // Number of files to process in a batch when counting files
@@ -130,27 +135,6 @@ const config = {
 
 
 
-  // *** C# Indexer Integration
-  // **************************************************
-  // Use C# indexer instead of Node.js indexer and watcher (takes over both indexing and file watching)
-  useCSharpIndexer: process.env.USE_CSHARP_INDEXER === 'true' || false,
-  // Path to the C# indexer executable
-  cSharpIndexerPath: process.env.CSHARP_INDEXER_PATH || path.join(__dirname, '../Indexer/bin/Release/net8.0/NtfsIndexer.exe'),
-  // Whether to force rebuild the C# index on startup
-  // cSharpIndexerForceRebuild: process.env.CSHARP_INDEXER_FORCE_REBUILD === 'true' || false,
-  // TODO: Now we can't get user input, so we force rebuild the C# index on startupn
-  cSharpIndexerForceRebuild: true,
-  // Timeout in seconds to wait for C# indexer startup (0 = no timeout)
-  cSharpIndexerStartupTimeout: parseInt(process.env.CSHARP_INDEXER_STARTUP_TIMEOUT) || 30,
-  // Whether to automatically restart C# indexer if it crashes
-  cSharpIndexerAutoRestart: process.env.CSHARP_INDEXER_AUTO_RESTART !== 'false', // default true
-  // Maximum number of restart attempts
-  cSharpIndexerMaxRestarts: parseInt(process.env.CSHARP_INDEXER_MAX_RESTARTS) || 3,
-  // Restart delay in seconds
-  cSharpIndexerRestartDelay: parseInt(process.env.CSHARP_INDEXER_RESTART_DELAY) || 5,
-
-
-
   // *** File watcher options
   // **************************************************
   // Enable real-time file system monitoring (ignored if useCSharpIndexer is true)
@@ -166,6 +150,27 @@ const config = {
   watchMaxRetries: parseInt(process.env.WATCH_MAX_RETRIES) || 3,
   // Delay in ms before retrying a failed watcher operation
   watchRetryDelay: parseInt(process.env.WATCH_RETRY_DELAY) || 10000, // 10 seconds
+
+
+
+  // *** C# Indexer Integration
+  // **************************************************
+  // Use C# indexer instead of Node.js indexer and watcher (takes over both indexing and file watching)
+  useCSharpIndexer: process.env.USE_CSHARP_INDEXER === 'true' || false,
+  // Path to the C# indexer executable
+  cSharpIndexerPath: process.env.CSHARP_INDEXER_PATH || path.join(__dirname, '../Indexer/bin/Release/net8.0/NtfsIndexer.exe'),
+  // Whether to force rebuild the C# index on startup
+  // true: Always delete existing database and rebuild from scratch
+  // false: Reuse existing index if available, only build if no index exists
+  cSharpIndexerForceRebuild: process.env.CSHARP_INDEXER_FORCE_REBUILD === 'true' || false,
+  // Timeout in seconds to wait for C# indexer startup (0 = no timeout)
+  cSharpIndexerStartupTimeout: parseInt(process.env.CSHARP_INDEXER_STARTUP_TIMEOUT) || 30,
+  // Whether to automatically restart C# indexer if it crashes
+  cSharpIndexerAutoRestart: process.env.CSHARP_INDEXER_AUTO_RESTART !== 'false', // default true
+  // Maximum number of restart attempts
+  cSharpIndexerMaxRestarts: parseInt(process.env.CSHARP_INDEXER_MAX_RESTARTS) || 3,
+  // Restart delay in seconds
+  cSharpIndexerRestartDelay: parseInt(process.env.CSHARP_INDEXER_RESTART_DELAY) || 5,
 
 
 

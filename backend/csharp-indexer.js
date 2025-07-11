@@ -34,22 +34,32 @@ class CSharpIndexerManager {
         throw new Error('C# indexer executable not found');
       }
 
+      // Convert base directory to absolute path
+      const absoluteBasePath = path.resolve(config.baseDirectory);
+      if (!fs.existsSync(absoluteBasePath)) {
+        console.error(`Base directory does not exist: ${absoluteBasePath}`);
+        throw new Error('Base directory does not exist');
+      }
+
       console.log('Starting C# indexer...');
       console.log(`Executable: ${config.cSharpIndexerPath}`);
-      console.log(`Base directory: ${config.baseDirectory}`);
+      console.log(`Base directory: ${absoluteBasePath}`);
       console.log(`Database path: ${config.fileIndexPath}`);
 
       // Prepare command arguments
-      const args = ['full', config.baseDirectory];
+      const args = ['full', absoluteBasePath];
       if (config.cSharpIndexerForceRebuild) {
         args.push('--force');
+        console.log('Force rebuild enabled - will delete existing database and rebuild index');
+      } else {
+        console.log('Incremental mode - will reuse existing index if available');
       }
 
       // Set environment variables for the C# process
       const env = {
         ...process.env,
         INDEXER_DB_PATH: config.fileIndexPath,
-        BASE_DIRECTORY: config.baseDirectory
+        BASE_DIRECTORY: absoluteBasePath
       };
 
       // Spawn the C# indexer process
@@ -241,14 +251,121 @@ class CSharpIndexerManager {
    * @returns {Object} Status object
    */
   getStatus() {
-    return {
-      isRunning: this.isRunning,
-      processId: this.process ? this.process.pid : null,
-      restartCount: this.restartCount,
-      executablePath: config.cSharpIndexerPath,
-      baseDirectory: config.baseDirectory,
-      databasePath: config.fileIndexPath
-    };
+    // Get database statistics if available
+    try {
+      if (!fs.existsSync(config.fileIndexPath)) {
+        return {
+          isRunning: this.isRunning,
+          fileCount: 0,
+          lastBuilt: null,
+          isBuilding: false,
+          progress: { total: 0, processed: 0, errors: 0 }
+        };
+      }
+
+      const Database = require('better-sqlite3');
+      let db = null;
+      
+      try {
+        db = new Database(config.fileIndexPath, { readonly: true });
+        
+        // Get file count
+        let fileCount = 0;
+        try {
+          const countResult = db.prepare('SELECT COUNT(*) as count FROM files').get();
+          fileCount = countResult ? countResult.count : 0;
+        } catch (error) {
+          // Table might not exist yet
+          fileCount = 0;
+        }
+
+        // Get last built timestamp
+        let lastBuilt = null;
+        let isBuilding = false;
+        try {
+          const lastBuiltResult = db.prepare(`SELECT value FROM metadata WHERE key = 'last_built'`).get();
+          lastBuilt = lastBuiltResult ? lastBuiltResult.value : null;
+          // If database exists but last_built is null, it means the indexer is building
+          isBuilding = lastBuilt === null;
+        } catch (error) {
+          // Metadata table might not exist yet, which means indexer is building
+          lastBuilt = null;
+          isBuilding = true;
+        }
+
+        return {
+          isRunning: this.isRunning,
+          fileCount,
+          lastBuilt,
+          isBuilding,
+          progress: { total: fileCount, processed: fileCount, errors: 0 }
+        };
+      } finally {
+        if (db) {
+          db.close();
+        }
+      }
+    } catch (error) {
+      console.error('Error getting C# indexer database stats:', error);
+      return {
+        isRunning: this.isRunning,
+        fileCount: 0,
+        lastBuilt: null,
+        isBuilding: false,
+        progress: { total: 0, processed: 0, errors: 0 }
+      };
+    }
+  }
+
+  /**
+   * Check if C# indexer database is built and contains data
+   * @returns {boolean}
+   */
+  isDatabaseBuilt() {
+    try {
+      // Check if database file exists
+      if (!fs.existsSync(config.fileIndexPath)) {
+        return false;
+      }
+
+      // Check if database file is not empty
+      const stats = fs.statSync(config.fileIndexPath);
+      if (stats.size === 0) {
+        return false;
+      }
+
+      // Check if the index has been built by looking for 'last_built' metadata
+      const Database = require('better-sqlite3');
+      let db = null;
+      
+      try {
+        db = new Database(config.fileIndexPath, { readonly: true });
+        
+        // Check if metadata table exists
+        const tableExists = db.prepare(`
+          SELECT name FROM sqlite_master 
+          WHERE type='table' AND name='metadata'
+        `).get();
+        
+        if (!tableExists) {
+          return false;
+        }
+        
+        // Check if 'last_built' metadata exists
+        const lastBuilt = db.prepare(`
+          SELECT value FROM metadata WHERE key = 'last_built'
+        `).get();
+        
+        return lastBuilt && lastBuilt.value !== null;
+      } finally {
+        if (db) {
+          db.close();
+        }
+      }
+    } catch (error) {
+      console.error('Error checking C# indexer database:', error);
+      return false;
+    }
   }
 
   /**

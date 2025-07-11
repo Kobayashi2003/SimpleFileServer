@@ -205,12 +205,12 @@ function FileExplorerContent() {
   const [useImageQuickPreview, setUseImageQuickPreview] = useState(false);
   const [useDirectionMenu, setUseDirectionMenu] = useState(true);
   const [useBlur, setUseBlur] = useState(true);
-  const [useDoubleClick, setUseDoubleClick] = useState(true);
+  const [useDoubleClick, setUseDoubleClick] = useState(false);
   const [doubleClickAction, setDoubleClickAction] = useState<'imageOnly' | 'recursiveSearch' | 'refresh'>('recursiveSearch');
 
   // EXPERIMENTAL FEATURE FOR FILE INDEXING
-  const [useFileIndex, setUseFileIndex] = useState(true);
-  const [useFileWatcher, setUseFileWatcher] = useState(true);
+  const [useFileIndex, setUseFileIndex] = useState(false);
+  const [useFileWatcher, setUseFileWatcher] = useState(false);
   const [showIndexDialog, setShowIndexDialog] = useState(false);
   const [showWatcherDialog, setShowWatcherDialog] = useState(false);
 

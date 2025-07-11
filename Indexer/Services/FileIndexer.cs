@@ -33,6 +33,43 @@ public class FileIndexer
         
         try
         {
+            // Check if index already exists and verify base directory and path format
+            var lastBuilt = _database.GetMetadata("last_built");
+            var storedBaseDirectory = _database.GetMetadata("base_directory");
+            var storedUseRelativePaths = _database.GetMetadata("use_relative_paths");
+            
+            if (!string.IsNullOrEmpty(lastBuilt))
+            {
+                bool pathFormatChanged = false;
+                if (!string.IsNullOrEmpty(storedUseRelativePaths))
+                {
+                    var previousUseRelativePaths = bool.Parse(storedUseRelativePaths);
+                    pathFormatChanged = previousUseRelativePaths != _useRelativePaths;
+                }
+
+                if (!string.IsNullOrEmpty(storedBaseDirectory) && storedBaseDirectory != _baseDirectory)
+                {
+                    _logger.LogWarning("Base directory changed from {OldPath} to {NewPath}. Forcing rebuild...", 
+                        storedBaseDirectory, _baseDirectory);
+                }
+                else if (pathFormatChanged)
+                {
+                    _logger.LogWarning("Path format changed from {OldFormat} to {NewFormat}. Forcing rebuild...",
+                        !_useRelativePaths ? "relative" : "absolute",
+                        _useRelativePaths ? "relative" : "absolute");
+                }
+                else
+                {
+                    _logger.LogInformation("Existing index found, built on: {LastBuilt}", lastBuilt);
+                    _logger.LogInformation("Index already exists, skipping rebuild. Use --force to rebuild.");
+                    return;
+                }
+            }
+
+            // Clear existing index and metadata
+            _database.ClearIndex();
+            _logger.LogInformation("Cleared existing index data");
+
             var entries = new List<FileEntry>();
             
             // Process the root directory
@@ -61,7 +98,6 @@ public class FileIndexer
             _database.UpdateMetadata("last_built", DateTime.Now.ToString("O"));
             _database.UpdateMetadata("base_directory", _baseDirectory);
             _database.UpdateMetadata("use_relative_paths", _useRelativePaths.ToString());
-            _database.UpdateMetadata("total_processed", _processedFiles.ToString());
             
             _logger.LogInformation("Initial index build completed. Processed {ProcessedFiles} items", _processedFiles);
         }

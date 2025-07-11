@@ -970,7 +970,11 @@ export const EPUBReader = ({
         </button>
 
         {showSettings && (
-          <div className="absolute bottom-0 right-full mr-2 bg-black/80 text-white backdrop-blur-sm p-4 rounded-lg min-w-[250px]">
+          <div className={cn(
+              "absolute bottom-0 right-full mr-2 bg-black/80 text-white backdrop-blur-sm p-4 rounded-lg min-w-[250px]",
+              "border",
+              darkMode ? "border-gray-700" : "border-gray-300"
+            )}>
             <div className="grid gap-3">
               {/* Font Size */}
               <div className="flex justify-between items-center">
