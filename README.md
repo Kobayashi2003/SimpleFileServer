@@ -135,7 +135,7 @@ The backend default configuration file is located at `backend/config.js`. You ca
 | Configuration Item | Environment Variable | Default Value | Description |
 |-------------------|---------------------|---------------|-------------|
 | Port Number | PORT | 11073 | Server listening port |
-| Base Directory | BASE_DIRECTORY | D:/Temp | Base directory for file server, where all files are stored |
+| Base Directory | BASE_DIRECTORY | example | Base directory for file server, where all files are stored |
 | Temporary Directory | TMP_DIRECTORY | {system temp}/simple-file-server | Directory for storing temporary files |
 | Parallel File Processing | PARALLEL_FILE_PROCESSING | true | Enable parallel file processing for better performance |
 | Upload Count Limit | UPLOAD_COUNT_LIMIT | 10 | Maximum number of files per upload |
