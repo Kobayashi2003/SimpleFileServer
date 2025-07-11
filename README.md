@@ -68,8 +68,7 @@ The project is simply divided into three parts:
 
 ### Required Environment
 
-- Node.js
-- .NET 8.0
+- Node.js (The version I used is v24.0.0, and the npm version is 11.3.0.)
 
 ### Optional Environment
 
