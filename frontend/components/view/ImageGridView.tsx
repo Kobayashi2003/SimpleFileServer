@@ -19,6 +19,7 @@ interface FileContextMenuProps {
   onCut: (path: string) => void;
   onDownload: (path: string) => void;
   onDelete: (path: string) => void;
+  handleContextMenu: () => void;
 }
 
 const FileContextMenu = React.memo(({ 
@@ -31,11 +32,12 @@ const FileContextMenu = React.memo(({
   onCopy, 
   onCut, 
   onDownload, 
-  onDelete 
+  onDelete,
+  handleContextMenu
 }: FileContextMenuProps) => {
   return (
     <ContextMenu>
-      <ContextMenuTrigger>
+      <ContextMenuTrigger onContextMenu={handleContextMenu}>
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -96,21 +98,28 @@ interface ImageCellProps {
     onShowDetails: (file: FileData) => void;
     onQuickSelect: (path: string) => void;
     onRename: (path: string) => void;
+    onFocusItem: (index: number) => void;
     focusedIndex: number | null;
   };
 }
 
 const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
+  const { files, selectedFiles, isSelecting, columnCount, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, onFocusItem, focusedIndex } = data;
   const index = rowIndex * columnCount + columnIndex;
   if (index >= files.length) return null;
 
   const file = files[index];
   const isSelected = isSelecting && selectedFiles.includes(file.path);
+  const isFocused = focusedIndex === index;
+
+  const handleContextMenu = useCallback(() => {
+    onFocusItem(index);
+  }, [index, onFocusItem]);
+
   const commonClassName = cn(
     "w-full h-full object-cover rounded-md cursor-pointer",
     isSelected && "border-2 border-blue-500 bg-blue-500/10 hover:text-black hover:bg-blue-500/20",
-    focusedIndex === index && "border-2 border-yellow-500"
+    isFocused && "border-2 border-yellow-500"
   );
 
   if (file.mimeType?.startsWith('image/')) {
@@ -126,6 +135,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
           onCut={onCut}
           onDownload={onDownload}
           onDelete={onDelete}
+          handleContextMenu={handleContextMenu}
         >
           <ImageItem
             src={`/api/raw?path=${encodeURIComponent(file.path)}`}
@@ -152,6 +162,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
           onCut={onCut}
           onDownload={onDownload}
           onDelete={onDelete}
+          handleContextMenu={handleContextMenu}
         >
           <VideoItem
             alt={file.name}
@@ -176,6 +187,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
           onCut={onCut}
           onDownload={onDownload}
           onDelete={onDelete}
+          handleContextMenu={handleContextMenu}
         >
           <EPUBItem
             alt={file.name}
@@ -200,6 +212,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
           onCut={onCut}
           onDownload={onDownload}
           onDelete={onDelete}
+          handleContextMenu={handleContextMenu}
         >
           <FileItemGridView
             {...file}
@@ -241,6 +254,7 @@ interface ImageGridViewProps {
   onShowDetails: (file: FileData) => void;
   onQuickSelect: (path: string) => void;
   onRename: (path: string) => void;
+  onFocusItem: (index: number) => void;
   onScroll: (info: any) => void;
   onItemsRendered: (info: { visibleStartIndex: number; visibleStopIndex: number }) => void;
   imageGridRef: React.RefObject<Grid | null>;
@@ -262,6 +276,7 @@ export function ImageGridView({
   onShowDetails,
   onQuickSelect,
   onRename,
+  onFocusItem,
   onScroll,
   onItemsRendered,
   imageGridRef
@@ -303,6 +318,7 @@ export function ImageGridView({
         onShowDetails,
         onQuickSelect,
         onRename,
+        onFocusItem,
         focusedIndex
       }}
       className="custom-scrollbar"

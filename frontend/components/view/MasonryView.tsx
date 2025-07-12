@@ -26,17 +26,22 @@ interface MasonryCellProps {
     onShowDetails: (file: FileData) => void;
     onQuickSelect: (path: string) => void;
     onRename: (path: string) => void;
+    onFocusItem: (index: number) => void;
     focusedIndex: number | null;
   };
 }
 
 const MasonryCell = React.memo(({ index, style, data }: MasonryCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, columnWidth, direction, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
+  const { files, selectedFiles, isSelecting, columnCount, columnWidth, direction, useImageQuickPreview, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, onFocusItem, focusedIndex } = data;
   // Each index represents a column of images
   if (index >= columnCount) return null;
 
   // Get files for this column using distribution algorithm
   const columnFiles = files.filter((_, fileIndex) => fileIndex % columnCount === index);
+
+  const handleContextMenu = useCallback(() => {
+    onFocusItem(index);
+  }, [index, onFocusItem]);
 
   return (
     <div
@@ -54,7 +59,7 @@ const MasonryCell = React.memo(({ index, style, data }: MasonryCellProps) => {
       {columnFiles.map((file) => (
         <div key={file.path} className="break-inside-avoid mb-2 w-full">
           <ContextMenu>
-            <ContextMenuTrigger>
+            <ContextMenuTrigger onContextMenu={handleContextMenu}>
               <ImageItem
                 {...file}
                 src={`/api/raw?path=${encodeURIComponent(file.path)}`}
@@ -131,6 +136,7 @@ interface MasonryViewProps {
   onShowDetails: (file: FileData) => void;
   onQuickSelect: (path: string) => void;
   onRename: (path: string) => void;
+  onFocusItem: (index: number) => void;
   masonryRef: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -151,6 +157,7 @@ export const MasonryView = React.memo(({
   onShowDetails,
   onQuickSelect,
   onRename,
+  onFocusItem,
   masonryRef
 }: MasonryViewProps) => {
   const columnCount = getColumnCount(width);
@@ -186,6 +193,7 @@ export const MasonryView = React.memo(({
             onShowDetails,
             onQuickSelect,
             onRename,
+            onFocusItem,
             focusedIndex
           }}
         />

@@ -24,20 +24,25 @@ interface FileRowProps {
     onShowDetails: (file: FileData) => void;
     onQuickSelect: (path: string) => void;
     onRename: (path: string) => void;
+    onFocusItem: (index: number) => void;
     focusedIndex: number | null;
   };
 }
 
 const FileRow = React.memo(({ index, style, data }: FileRowProps) => {
-  const { files, selectedFiles, isSelecting, isSearching, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
+  const { files, selectedFiles, isSelecting, isSearching, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, onFocusItem, focusedIndex } = data;
   const file = files[index];
   const isFocused = focusedIndex === index;
   const isSelected = isSelecting && selectedFiles.includes(file.path);
 
+  const handleContextMenu = useCallback(() => {
+    onFocusItem(index);
+  }, [index, onFocusItem]);
+
   return (
     <div style={style}>
       <ContextMenu>
-        <ContextMenuTrigger>
+        <ContextMenuTrigger onContextMenu={handleContextMenu}>
           <FileItemListView
             {...file}
             isSearching={isSearching}
@@ -104,6 +109,7 @@ interface ListViewProps {
   onShowDetails: (file: FileData) => void;
   onQuickSelect: (path: string) => void;
   onRename: (path: string) => void;
+  onFocusItem: (index: number) => void;
   onScroll: (info: any) => void;
   onItemsRendered: (info: { visibleStartIndex: number; visibleStopIndex: number }) => void;
   listRef: React.RefObject<List | null>;
@@ -125,6 +131,7 @@ export const ListView = React.memo(({
   onShowDetails,
   onQuickSelect,
   onRename,
+  onFocusItem,
   onScroll,
   onItemsRendered,
   listRef
@@ -159,6 +166,7 @@ export const ListView = React.memo(({
         onShowDetails,
         onQuickSelect,
         onRename,
+        onFocusItem,
         focusedIndex
       }}
       className="custom-scrollbar"

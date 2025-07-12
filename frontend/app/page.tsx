@@ -45,6 +45,7 @@ interface FileData {
   mimeType?: string;
   cover?: string;
 }
+
 interface PreviewState {
   isOpen: boolean;
   path: string;
@@ -630,6 +631,10 @@ function FileExplorerContent() {
   const handleShowDetails = useCallback((file: FileData) => {
     setFileToShowDetails(file);
     setDetailsDialogOpen(true);
+  }, []);
+
+  const handleFocusItem = useCallback((index: number) => {
+    setFocusedFileIndex(index);
   }, []);
 
 
@@ -2502,6 +2507,7 @@ function FileExplorerContent() {
                     onShowDetails={handleShowDetails}
                     onQuickSelect={handleQuickSelect}
                     onRename={handleRename}
+                    onFocusItem={handleFocusItem}
                     onScroll={handleVirtualizedScroll}
                     onItemsRendered={handleItemsRendered}
                     listRef={listRef}
@@ -2527,6 +2533,7 @@ function FileExplorerContent() {
                     onShowDetails={handleShowDetails}
                     onQuickSelect={handleQuickSelect}
                     onRename={handleRename}
+                    onFocusItem={handleFocusItem}
                     onScroll={handleVirtualizedScroll}
                     onItemsRendered={handleItemsRendered}
                     gridRef={gridRef}
@@ -2556,6 +2563,7 @@ function FileExplorerContent() {
                         onShowDetails={handleShowDetails}
                         onQuickSelect={handleQuickSelect}
                         onRename={handleRename}
+                        onFocusItem={handleFocusItem}
                         masonryRef={masonryRef}
                       />
                     )}
@@ -2579,6 +2587,7 @@ function FileExplorerContent() {
                         onShowDetails={handleShowDetails}
                         onQuickSelect={handleQuickSelect}
                         onRename={handleRename}
+                        onFocusItem={handleFocusItem}
                         onScroll={handleVirtualizedScroll}
                         onItemsRendered={handleItemsRendered}
                         imageGridRef={imageGridRef}

@@ -25,12 +25,13 @@ interface FileCellProps {
     onShowDetails: (file: FileData) => void;
     onQuickSelect: (path: string) => void;
     onRename: (path: string) => void;
+    onFocusItem: (index: number) => void;
     focusedIndex: number | null;
   };
 }
 
 const FileCell = React.memo(({ columnIndex, rowIndex, style, data }: FileCellProps) => {
-  const { files, selectedFiles, isSelecting, columnCount, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, focusedIndex } = data;
+  const { files, selectedFiles, isSelecting, columnCount, onFileClick, onCopy, onCut, onDownload, onDelete, onShowDetails, onQuickSelect, onRename, onFocusItem, focusedIndex } = data;
   const index = rowIndex * columnCount + columnIndex;
   if (index >= files.length) return null;
 
@@ -38,10 +39,14 @@ const FileCell = React.memo(({ columnIndex, rowIndex, style, data }: FileCellPro
   const isFocused = focusedIndex === index;
   const isSelected = isSelecting && selectedFiles.includes(file.path);
 
+  const handleContextMenu = useCallback(() => {
+    onFocusItem(index)
+  }, [index, onFocusItem])
+
   return (
     <div style={style} className="p-1">
       <ContextMenu>
-        <ContextMenuTrigger>
+        <ContextMenuTrigger onContextMenu={handleContextMenu}>
           <FileItemGridView
             {...file}
             cover=""
@@ -114,6 +119,7 @@ interface GridViewProps {
   onShowDetails: (file: FileData) => void;
   onQuickSelect: (path: string) => void;
   onRename: (path: string) => void;
+  onFocusItem: (index: number) => void;
   onScroll: (info: any) => void;
   onItemsRendered: (info: { visibleStartIndex: number; visibleStopIndex: number }) => void;
   gridRef: React.RefObject<Grid | null>;
@@ -134,6 +140,7 @@ export const GridView = React.memo(({
   onShowDetails,
   onQuickSelect,
   onRename,
+  onFocusItem,
   onScroll,
   onItemsRendered,
   gridRef
@@ -174,6 +181,7 @@ export const GridView = React.memo(({
         onShowDetails,
         onQuickSelect,
         onRename,
+        onFocusItem,
         focusedIndex
       }}
       className="custom-scrollbar"
