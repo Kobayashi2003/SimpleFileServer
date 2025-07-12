@@ -1862,100 +1862,6 @@ app.post('/api/rename', writePermissionMiddleware, async (req, res) => {
   }
 })
 
-app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
-  const { path: filePath, paths: filePaths } = req.query;
-
-  if (!filePath && !filePaths) {
-    return res.status(400).json({ error: 'No file path provided' });
-  }
-
-  if (filePath) {
-    const basePath = path.resolve(config.baseDirectory);
-    const fullPath = path.join(basePath, filePath);
-
-    if (!fullPath.startsWith(basePath)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    try {
-      const isDirectory = fs.statSync(fullPath).isDirectory();
-
-      if (isDirectory) {
-        const success = utils.safeDeleteDirectory(fullPath);
-
-        // Update indexer if enabled
-        if (shouldUpdateNodeIndexer()) {
-          indexer.deleteFromIndex(filePath);
-          console.log(`Removed directory "${filePath}" from index`);
-        }
-
-        if (success) {
-          res.status(200).json({ message: 'Directory deleted successfully' });
-        } else {
-          res.status(500).json({ error: 'Failed to completely delete directory' });
-        }
-      } else {
-        fs.unlinkSync(fullPath);
-
-        // Update indexer if enabled
-        if (shouldUpdateNodeIndexer()) {
-          indexer.deleteFromIndex(filePath);
-          console.log(`Removed file "${filePath}" from index`);
-        }
-
-        res.status(200).json({ message: 'File deleted successfully' });
-      }
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-    return;
-  } else {
-    const basePath = path.resolve(config.baseDirectory);
-    const fullPaths = filePaths.split('|').map(p => path.join(basePath, p.trim()));
-    const relativePaths = filePaths.split('|').map(p => p.trim());
-
-    for (let i = 0; i < fullPaths.length; i++) {
-      const fullPath = fullPaths[i];
-      const relativePath = relativePaths[i];
-
-      if (!fullPath.startsWith(basePath)) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
-      try {
-        const isDirectory = fs.statSync(fullPath).isDirectory();
-
-        if (isDirectory) {
-          const success = utils.safeDeleteDirectory(fullPath);
-          if (!success) {
-            return res.status(500).json({ error: 'Failed to completely delete directory' });
-          }
-
-          // Update indexer if enabled
-          if (shouldUpdateNodeIndexer()) {
-            indexer.deleteFromIndex(relativePath);
-          }
-        } else {
-          fs.unlinkSync(fullPath);
-
-          // Update indexer if enabled
-          if (shouldUpdateNodeIndexer()) {
-            indexer.deleteFromIndex(relativePath);
-          }
-        }
-      } catch (error) {
-        return res.status(500).json({ error: error.message });
-      }
-    }
-
-    if (shouldUpdateNodeIndexer()) {
-      console.log(`Removed ${fullPaths.length} items from index`);
-    }
-
-    res.status(200).json({ message: 'Files deleted successfully' });
-  }
-})
-
 app.post('/api/clone', writePermissionMiddleware, (req, res) => {
   const { sources, destination } = req.body;
   const basePath = path.resolve(config.baseDirectory);
@@ -2184,6 +2090,429 @@ app.post('/api/move', writePermissionMiddleware, (req, res) => {
   }
 });
 
+app.delete('/api/delete', writePermissionMiddleware, (req, res) => {
+  const { path: filePath, paths: filePaths } = req.query;
+
+  if (!filePath && !filePaths) {
+    return res.status(400).json({ error: 'No file path provided' });
+  }
+
+  if (filePath) {
+    const basePath = path.resolve(config.baseDirectory);
+    const fullPath = path.join(basePath, filePath);
+
+    if (!fullPath.startsWith(basePath)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    try {
+      const isDirectory = fs.statSync(fullPath).isDirectory();
+
+      // Update indexer before moving/deleting the file
+      if (shouldUpdateNodeIndexer()) {
+        indexer.deleteFromIndex(filePath);
+        console.log(`Removed ${isDirectory ? 'directory' : 'file'} "${filePath}" from index`);
+      }
+
+      let success = false;
+      let message = '';
+
+      if (config.useRecycleBin) {
+        // Move to recycle bin instead of deleting
+        const result = moveToRecycleBin(fullPath, filePath);
+        success = result.success;
+        message = isDirectory 
+          ? 'Directory moved to recycle bin successfully' 
+          : 'File moved to recycle bin successfully';
+        
+        if (!success) {
+          return res.status(500).json({ error: result.error || 'Failed to move to recycle bin' });
+        }
+      } else {
+        // Original delete logic
+        if (isDirectory) {
+          success = utils.safeDeleteDirectory(fullPath);
+          message = 'Directory deleted successfully';
+          
+          if (!success) {
+            return res.status(500).json({ error: 'Failed to completely delete directory' });
+          }
+        } else {
+          fs.unlinkSync(fullPath);
+          success = true;
+          message = 'File deleted successfully';
+        }
+      }
+
+      res.status(200).json({ message });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+    return;
+  } else {
+    const basePath = path.resolve(config.baseDirectory);
+    const fullPaths = filePaths.split('|').map(p => path.join(basePath, p.trim()));
+    const relativePaths = filePaths.split('|').map(p => p.trim());
+
+    for (let i = 0; i < fullPaths.length; i++) {
+      const fullPath = fullPaths[i];
+      const relativePath = relativePaths[i];
+
+      if (!fullPath.startsWith(basePath)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      try {
+        const isDirectory = fs.statSync(fullPath).isDirectory();
+
+        // Update indexer before moving/deleting the file
+        if (shouldUpdateNodeIndexer()) {
+          indexer.deleteFromIndex(relativePath);
+        }
+
+        if (config.useRecycleBin) {
+          // Move to recycle bin instead of deleting
+          const result = moveToRecycleBin(fullPath, relativePath);
+          if (!result.success) {
+            return res.status(500).json({ 
+              error: result.error || 'Failed to move to recycle bin' 
+            });
+          }
+        } else {
+          // Original delete logic
+          if (isDirectory) {
+            const success = utils.safeDeleteDirectory(fullPath);
+            if (!success) {
+              return res.status(500).json({ error: 'Failed to completely delete directory' });
+            }
+          } else {
+            fs.unlinkSync(fullPath);
+          }
+        }
+      } catch (error) {
+        return res.status(500).json({ error: error.message });
+      }
+    }
+
+    if (shouldUpdateNodeIndexer()) {
+      console.log(`Removed ${fullPaths.length} items from index`);
+    }
+
+    const message = config.useRecycleBin 
+      ? 'Files moved to recycle bin successfully' 
+      : 'Files deleted successfully';
+    res.status(200).json({ message });
+  }
+})
+
+app.get('/api/recyclebin', authMiddleware, (req, res) => {
+  if (!config.useRecycleBin) {
+    return res.status(400).json({ error: "Recycle bin is not enabled" });
+  }
+
+  try {
+    const recycleBinItems = fs.readdirSync(config.recycleBinDirectory);
+    const items = [];
+    let totalSize = 0;
+
+    // Process all items except metadata files
+    recycleBinItems.forEach(item => {
+      if (item.endsWith('.meta.json')) return;
+
+      const itemPath = path.join(config.recycleBinDirectory, item);
+      const metadataPath = `${itemPath}.meta.json`;
+
+      try {
+        const stats = fs.statSync(itemPath);
+        const isDirectory = stats.isDirectory();
+        
+        // Calculate item size
+        const size = isDirectory ? calculateDirectorySize(itemPath) : stats.size;
+        totalSize += size;
+        
+        // Get metadata if available
+        let metadata = null;
+        let originalPath = null;
+        let deletedAt = null;
+        let expiresAt = null;
+
+        if (fs.existsSync(metadataPath)) {
+          try {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            originalPath = metadata.originalPath;
+            deletedAt = metadata.deletedAt;
+            expiresAt = metadata.expiresAt;
+          } catch (error) {
+            console.error(`Error reading metadata for ${item}: ${error.message}`);
+          }
+        }
+
+        items.push({
+          id: item,
+          name: originalPath ? path.basename(originalPath) : item.substring(item.indexOf('_') + 1),
+          originalPath,
+          deletedAt,
+          expiresAt,
+          size,
+          isDirectory
+        });
+      } catch (error) {
+        console.error(`Error processing recycle bin item ${item}: ${error.message}`);
+      }
+    });
+
+    // Sort by deletion date (newest first)
+    items.sort((a, b) => {
+      if (a.deletedAt && b.deletedAt) {
+        return new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime();
+      }
+      return 0;
+    });
+
+    res.json({
+      items,
+      totalSize,
+      totalSizeMB: (totalSize / (1024 * 1024)).toFixed(2),
+      maxSizeMB: config.recycleBinMaxSize,
+      retentionDays: config.recycleBinRetentionDays,
+      autoCleanup: config.recycleBinAutoCleanup
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/recyclebin/restore', writePermissionMiddleware, async (req, res) => {
+  if (!config.useRecycleBin) {
+    return res.status(400).json({ error: "Recycle bin is not enabled" });
+  }
+
+  const { id } = req.query;
+  if (!id) {
+    return res.status(400).json({ error: "No item ID provided" });
+  }
+
+  try {
+    const itemPath = path.join(config.recycleBinDirectory, id);
+    const metadataPath = `${itemPath}.meta.json`;
+
+    if (!fs.existsSync(itemPath)) {
+      return res.status(404).json({ error: "Item not found in recycle bin" });
+    }
+
+    // Get original path from metadata
+    let originalPath = null;
+    if (fs.existsSync(metadataPath)) {
+      try {
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        originalPath = metadata.originalPath;
+      } catch (error) {
+        console.error(`Error reading metadata for ${id}: ${error.message}`);
+      }
+    }
+
+    // If no original path found, can't restore
+    if (!originalPath) {
+      return res.status(400).json({ error: "Original path information not found, cannot restore" });
+    }
+
+    const basePath = path.resolve(config.baseDirectory);
+    const targetPath = path.join(basePath, originalPath);
+    const targetDir = path.dirname(targetPath);
+
+    // Create target directory if it doesn't exist
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    // Check if target already exists
+    if (fs.existsSync(targetPath)) {
+      return res.status(409).json({ error: "Target path already exists. Cannot restore." });
+    }
+
+    const isDirectory = fs.statSync(itemPath).isDirectory();
+
+    // Restore the file or directory
+    if (isDirectory) {
+      // For directories, copy recursively
+      copyFolderRecursiveSync(itemPath, targetPath);
+    } else {
+      // For files, just copy
+      fs.copyFileSync(itemPath, targetPath);
+    }
+
+    // Update the indexer if enabled
+    if (shouldUpdateNodeIndexer()) {
+      try {
+        // If it's a directory, we need to index it and its contents
+        if (isDirectory) {
+          const stats = fs.statSync(targetPath);
+          
+          // Add the directory itself
+          indexer.saveFileBatch([{
+            name: path.basename(originalPath),
+            path: originalPath,
+            size: stats.size,
+            mtime: stats.mtime.toISOString(),
+            mimeType: 'directory',
+            isDirectory: true
+          }]);
+          
+          // Index directory contents
+          indexDirectoryRecursively(targetPath, basePath)
+            .then(count => {
+              console.log(`Indexed ${count} items in restored directory ${originalPath}`);
+            })
+            .catch(err => {
+              console.error(`Error indexing restored directory: ${err.message}`);
+            });
+        } else {
+          // For files, just add the file
+          const stats = fs.statSync(targetPath);
+          const mimeType = await utils.getFileType(targetPath);
+          
+          indexer.saveFileBatch([{
+            name: path.basename(originalPath),
+            path: originalPath,
+            size: stats.size,
+            mtime: stats.mtime.toISOString(),
+            mimeType: mimeType,
+            isDirectory: false
+          }]);
+        }
+      } catch (error) {
+        console.error(`Error updating index for restored item: ${error.message}`);
+      }
+    }
+
+    // Delete the item from recycle bin
+    if (isDirectory) {
+      utils.safeDeleteDirectory(itemPath);
+    } else {
+      fs.unlinkSync(itemPath);
+    }
+
+    // Delete metadata file
+    if (fs.existsSync(metadataPath)) {
+      fs.unlinkSync(metadataPath);
+    }
+
+    res.json({ 
+      message: `${isDirectory ? 'Directory' : 'File'} restored successfully to ${originalPath}`,
+      restoredTo: originalPath 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/recyclebin/delete', writePermissionMiddleware, (req, res) => {
+  if (!config.useRecycleBin) {
+    return res.status(400).json({ error: "Recycle bin is not enabled" });
+  }
+
+  const { id } = req.query;
+  if (!id) {
+    return res.status(400).json({ error: "No item ID provided" });
+  }
+
+  try {
+    const itemPath = path.join(config.recycleBinDirectory, id);
+    const metadataPath = `${itemPath}.meta.json`;
+
+    if (!fs.existsSync(itemPath)) {
+      return res.status(404).json({ error: "Item not found in recycle bin" });
+    }
+
+    const isDirectory = fs.statSync(itemPath).isDirectory();
+
+    // Delete the item
+    let success = false;
+    if (isDirectory) {
+      success = utils.safeDeleteDirectory(itemPath);
+      if (!success) {
+        return res.status(500).json({ error: "Failed to delete directory from recycle bin" });
+      }
+    } else {
+      fs.unlinkSync(itemPath);
+      success = true;
+    }
+
+    // Delete metadata file
+    if (fs.existsSync(metadataPath)) {
+      fs.unlinkSync(metadataPath);
+    }
+
+    res.json({ message: `${isDirectory ? 'Directory' : 'File'} permanently deleted from recycle bin` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/recyclebin/empty', writePermissionMiddleware, (req, res) => {
+  if (!config.useRecycleBin) {
+    return res.status(400).json({ error: "Recycle bin is not enabled" });
+  }
+
+  try {
+    const recycleBinItems = fs.readdirSync(config.recycleBinDirectory);
+    let deletedCount = 0;
+    let errorCount = 0;
+
+    // Process all items except metadata files
+    recycleBinItems.forEach(item => {
+      if (item.endsWith('.meta.json')) return;
+
+      const itemPath = path.join(config.recycleBinDirectory, item);
+      const metadataPath = `${itemPath}.meta.json`;
+
+      try {
+        const isDirectory = fs.statSync(itemPath).isDirectory();
+
+        // Delete the item
+        if (isDirectory) {
+          const success = utils.safeDeleteDirectory(itemPath);
+          if (success) {
+            deletedCount++;
+          } else {
+            errorCount++;
+          }
+        } else {
+          fs.unlinkSync(itemPath);
+          deletedCount++;
+        }
+
+        // Delete metadata file
+        if (fs.existsSync(metadataPath)) {
+          fs.unlinkSync(metadataPath);
+        }
+      } catch (error) {
+        console.error(`Error deleting recycle bin item ${item}: ${error.message}`);
+        errorCount++;
+      }
+    });
+
+    // Delete any orphaned metadata files
+    recycleBinItems.forEach(item => {
+      if (item.endsWith('.meta.json')) {
+        try {
+          fs.unlinkSync(path.join(config.recycleBinDirectory, item));
+        } catch (error) {
+          console.error(`Error deleting orphaned metadata file ${item}: ${error.message}`);
+        }
+      }
+    });
+
+    res.json({ 
+      message: `Recycle bin emptied successfully`,
+      deletedCount,
+      errorCount
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 app.get('/api/index-status', (req, res) => {
   if (config.useCSharpIndexer && csharpIndexer.isAvailable()) {
@@ -2297,6 +2626,7 @@ app.post('/api/toggle-watcher', writePermissionMiddleware, async (req, res) => {
     return res.status(400).json({ error: "File watching is not enabled in config" });
   }
 });
+
 
 function handleMediaFilesRequest(req, res, mediaType, isRecursive, dir, page, limit, sortBy, sortOrder) {
   const basePath = path.resolve(config.baseDirectory);
@@ -2766,6 +3096,251 @@ async function indexDirectoryRecursively(dirPath, basePath) {
     console.error(`Error indexing directory ${dirPath}:`, error);
     return 0;
   }
+}
+
+// Helper function to move file to recycle bin
+async function moveToRecycleBin(sourcePath, relativePath) {
+  try {
+    // Generate a unique filename to prevent collisions in the recycle bin
+    const timestamp = new Date().toISOString().replace(/[:.-]/g, '_');
+    const originalName = path.basename(sourcePath);
+    const recyclePath = path.join(
+      config.recycleBinDirectory,
+      `${timestamp}_${originalName}`
+    );
+    
+    // Create recycle bin metadata to track original path and deletion time
+    const metadata = {
+      originalPath: relativePath,
+      deletedAt: new Date().toISOString(),
+      expiresAt: config.recycleBinRetentionDays > 0 
+        ? new Date(Date.now() + config.recycleBinRetentionDays * 24 * 60 * 60 * 1000).toISOString()
+        : null
+    };
+    
+    const isDirectory = fs.statSync(sourcePath).isDirectory();
+    
+    if (isDirectory) {
+      // For directories, we need to copy the directory structure
+      copyFolderRecursiveSync(sourcePath, recyclePath);
+      
+      // Save metadata alongside the directory
+      fs.writeFileSync(
+        `${recyclePath}.meta.json`, 
+        JSON.stringify(metadata, null, 2)
+      );
+      
+      // Remove the original directory after successful copy
+      utils.safeDeleteDirectory(sourcePath);
+      return { success: true, recyclePath };
+    } else {
+      // For files, just move the file
+      fs.mkdirSync(path.dirname(recyclePath), { recursive: true });
+      fs.copyFileSync(sourcePath, recyclePath);
+      
+      // Save metadata alongside the file
+      fs.writeFileSync(
+        `${recyclePath}.meta.json`, 
+        JSON.stringify(metadata, null, 2)
+      );
+      
+      // Remove the original file after successful copy
+      fs.unlinkSync(sourcePath);
+      return { success: true, recyclePath };
+    }
+  } catch (error) {
+    console.error(`Error moving to recycle bin: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+// Helper function to clean up old items in recycle bin
+function cleanupRecycleBin() {
+  if (!config.recycleBinAutoCleanup) {
+    return;
+  }
+  
+  try {
+    const recycleBinItems = fs.readdirSync(config.recycleBinDirectory);
+    const now = Date.now();
+    let recycleBinSize = 0;
+    const itemsWithMetadata = [];
+    
+    // First pass: collect metadata and calculate total size
+    recycleBinItems.forEach(item => {
+      // Skip metadata files, we'll process them with their corresponding items
+      if (item.endsWith('.meta.json')) return;
+      
+      const itemPath = path.join(config.recycleBinDirectory, item);
+      const metadataPath = `${itemPath}.meta.json`;
+      
+      try {
+        // Get item stats
+        const stats = fs.statSync(itemPath);
+        const isDirectory = stats.isDirectory();
+        let itemSize = 0;
+        
+        if (isDirectory) {
+          // For directories, calculate recursive size
+          itemSize = calculateDirectorySize(itemPath);
+        } else {
+          // For files, use the file size
+          itemSize = stats.size;
+        }
+        
+        // Add to total size (convert to MB)
+        recycleBinSize += itemSize / (1024 * 1024);
+        
+        // Collect item info with metadata
+        let metadata = null;
+        if (fs.existsSync(metadataPath)) {
+          try {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+          } catch (error) {
+            console.error(`Error reading metadata for ${item}: ${error.message}`);
+          }
+        }
+        
+        itemsWithMetadata.push({
+          name: item,
+          path: itemPath,
+          metadataPath,
+          isDirectory,
+          size: itemSize,
+          mtime: stats.mtimeMs,
+          metadata
+        });
+      } catch (error) {
+        console.error(`Error processing recycle bin item ${item}: ${error.message}`);
+      }
+    });
+    
+    // Age-based cleanup: remove items older than retention days
+    if (config.recycleBinRetentionDays > 0) {
+      const maxAge = config.recycleBinRetentionDays * 24 * 60 * 60 * 1000;
+      
+      itemsWithMetadata.forEach(item => {
+        let shouldDelete = false;
+        
+        // Check expiry based on metadata first
+        if (item.metadata && item.metadata.expiresAt) {
+          const expiryTime = new Date(item.metadata.expiresAt).getTime();
+          if (now > expiryTime) {
+            shouldDelete = true;
+          }
+        } else {
+          // Fallback to file modification time
+          const fileAge = now - item.mtime;
+          if (fileAge > maxAge) {
+            shouldDelete = true;
+          }
+        }
+        
+        if (shouldDelete) {
+          try {
+            // Delete the item
+            if (item.isDirectory) {
+              utils.safeDeleteDirectory(item.path);
+            } else {
+              fs.unlinkSync(item.path);
+            }
+            
+            // Delete the metadata file if it exists
+            if (fs.existsSync(item.metadataPath)) {
+              fs.unlinkSync(item.metadataPath);
+            }
+            
+            console.log(`Removed expired item from recycle bin: ${item.name}`);
+            
+            // Update recycle bin size
+            recycleBinSize -= item.size / (1024 * 1024);
+          } catch (error) {
+            console.error(`Error deleting expired item ${item.name}: ${error.message}`);
+          }
+        }
+      });
+    }
+    
+    // Size-based cleanup: remove oldest items if bin is too large
+    if (config.recycleBinMaxSize > 0 && recycleBinSize > config.recycleBinMaxSize) {
+      console.log(`Recycle bin size (${recycleBinSize.toFixed(2)} MB) exceeds maximum (${config.recycleBinMaxSize} MB), cleaning up...`);
+      
+      // Sort items by deletion time (oldest first)
+      const remainingItems = itemsWithMetadata.filter(item => {
+        // Only consider items that still exist (weren't removed in age-based cleanup)
+        return fs.existsSync(item.path);
+      }).sort((a, b) => {
+        // Sort by metadata deletion time if available
+        if (a.metadata?.deletedAt && b.metadata?.deletedAt) {
+          return new Date(a.metadata.deletedAt).getTime() - new Date(b.metadata.deletedAt).getTime();
+        }
+        // Fallback to file modification time
+        return a.mtime - b.mtime;
+      });
+      
+      // Remove oldest items until we're under the size limit
+      while (recycleBinSize > config.recycleBinMaxSize && remainingItems.length > 0) {
+        const oldestItem = remainingItems.shift();
+        try {
+          // Delete the item
+          if (oldestItem.isDirectory) {
+            utils.safeDeleteDirectory(oldestItem.path);
+          } else {
+            fs.unlinkSync(oldestItem.path);
+          }
+          
+          // Delete the metadata file if it exists
+          if (fs.existsSync(oldestItem.metadataPath)) {
+            fs.unlinkSync(oldestItem.metadataPath);
+          }
+          
+          console.log(`Removed oldest item from recycle bin due to size limit: ${oldestItem.name}`);
+          
+          // Update recycle bin size
+          recycleBinSize -= oldestItem.size / (1024 * 1024);
+        } catch (error) {
+          console.error(`Error deleting oldest item ${oldestItem.name}: ${error.message}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error(`Error cleaning up recycle bin: ${error.message}`);
+  }
+}
+
+// Helper function to calculate directory size recursively
+function calculateDirectorySize(directoryPath) {
+  let totalSize = 0;
+  
+  try {
+    const items = fs.readdirSync(directoryPath);
+    
+    for (const item of items) {
+      const itemPath = path.join(directoryPath, item);
+      const stats = fs.statSync(itemPath);
+      
+      if (stats.isDirectory()) {
+        // Recursively calculate subdirectory size
+        totalSize += calculateDirectorySize(itemPath);
+      } else {
+        // Add file size
+        totalSize += stats.size;
+      }
+    }
+  } catch (error) {
+    console.error(`Error calculating directory size for ${directoryPath}: ${error.message}`);
+  }
+  
+  return totalSize;
+}
+
+// Run cleanup on startup and periodically
+if (config.recycleBinAutoCleanup && config.recycleBinRetentionDays > 0) {
+  // Initial cleanup
+  cleanupRecycleBin();
+  
+  // Schedule periodic cleanup (daily)
+  setInterval(cleanupRecycleBin, 24 * 60 * 60 * 1000);
 }
 
 function copyFolderRecursiveSync(source, destination) {

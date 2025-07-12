@@ -224,6 +224,16 @@ The backend default configuration file is located at `backend/config.js`. You ca
 | Max Retries | WATCH_MAX_RETRIES | 3 | Maximum retry attempts |
 | Retry Delay | WATCH_RETRY_DELAY | 10000 | Delay before retry in ms |
 
+#### Recycle Bin Configuration
+
+| Configuration Item | Environment Variable | Default Value | Description |
+|-------------------|---------------------|---------------|-------------|
+| Use Recycle Bin | USE_RECYCLE_BIN | false | Enable recycle bin functionality |
+| Recycle Bin Directory | RECYCLE_BIN_DIRECTORY | {temp}/recycle-bin | Directory for storing deleted files |
+| Recycle Bin Retention Days | RECYCLE_BIN_RETENTION_DAYS | 30 | Number of days to keep files in recycle bin |
+| Recycle Bin Auto Cleanup | RECYCLE_BIN_AUTO_CLEANUP | true | Enable automatic cleanup of old files in recycle bin |
+| Recycle Bin Max Size | RECYCLE_BIN_MAX_SIZE | 0 | Maximum size of recycle bin in MB |
+
 ### Frontend Configuration
 
 The frontend configuration file is located at `frontend/next.config.ts`, mainly for configuring API proxy. You can override the default configuration through environment variables or by creating a `.env.local` file.
@@ -257,7 +267,7 @@ USE_MIME_MAGIC=true
 - [x] **TODO**:preview窗口关闭时，让页面的定位到preview窗口关闭前展示的文件的位置
 - [ ] **TODO**:实现文件的拖拽功能，用于拖动移动文件
 - [ ] **TODO**:~~页面全局的快捷手势，例如快捷后退前进~~
-- [ ] **TODO**:后端实现回收站机制
+- [x] **TODO**:后端实现回收站机制
 - [x] **TODO**:视频点击关闭工具栏
 - [x] **TODO**:Image View下，让epub文件显示封面
 - [x] **TODO**:允许backend中files的api不通过index直接返回文件夹内容
@@ -272,6 +282,7 @@ USE_MIME_MAGIC=true
 - [ ] **TODO**:实现对URL的预览
 - [ ] **TODO**:实现对多根目录的支持
 - [ ] **TODO**:实现VideoOnly与AudioOnly模式
+- [ ] **TODO**:为C# indexer添加monitor的可关闭功能
 
 ## BUG
 
@@ -287,3 +298,4 @@ USE_MIME_MAGIC=true
 - [x] **BUG**:imageOnlyMode在切换时，存在页面闪烁问题
 - [x] **BUG**:搜索框的右键点击事件会因被directionMenu拦截而失效
 - [ ] **BUG**:~~非递归搜索时，搜索结果不包括文件夹~~
+- [ ] **BUG**:C# indexer的monitor在监测时，若文件夹内的文件有create、delete或者rename（不包括change）事件，会触发其直接父目录的change事件，然而现在的indexer在监测到父目录的change事件后，会对父目录进行递归的rebuild，即便变更的只有父目录。这可能会导致大量无关文件的rebuild，浪费大量的性能，因为此时实际上有的只有一个文件的事件和一个它的父文件夹的change事件。而我之所以需要进行递归处理，是因为在父目录有create delete rename事件时，indexer并不会触发其子项的change事件，但是对与索引的建立来说子项是需要更新的。

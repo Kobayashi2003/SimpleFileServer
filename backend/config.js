@@ -188,6 +188,37 @@ const config = {
       // '.myext': 'application/my-custom-type',
     },
 
+
+
+  // *** Recycle Bin options
+  // **************************************************
+  // Enable recycle bin functionality (move files to recycle bin instead of permanent deletion)
+  // When enabled, files are moved to the recycle bin directory instead of being permanently deleted
+  // You can enable this feature by setting the environment variable USE_RECYCLE_BIN=true
+  useRecycleBin: process.env.USE_RECYCLE_BIN === 'true' || false,
+  
+  // Directory for storing deleted files (recycle bin)
+  // This directory will store all files that are "deleted" when recycle bin is enabled
+  // Each file/folder is stored with a timestamp prefix to avoid name collisions
+  // A metadata file (.meta.json) is created alongside each item to track its original path and deletion time
+  recycleBinDirectory: process.env.RECYCLE_BIN_DIRECTORY || path.join(TMP_DIR, 'recycle-bin'),
+  
+  // Maximum number of days to keep files in recycle bin (0 = keep forever)
+  // Files older than this will be permanently deleted during automatic cleanup
+  // Set to 0 to keep files in recycle bin indefinitely (manual cleanup only)
+  recycleBinRetentionDays: parseInt(process.env.RECYCLE_BIN_RETENTION_DAYS) || 30,
+  
+  // Enable automatic cleanup of old files in recycle bin based on retention days
+  // When enabled, files older than recycleBinRetentionDays will be permanently deleted
+  // Cleanup runs on server startup and once per day afterward
+  recycleBinAutoCleanup: process.env.RECYCLE_BIN_AUTO_CLEANUP !== 'false', // default true
+  
+  // Maximum size of recycle bin in MB (0 = no limit)
+  // When the recycle bin exceeds this size, oldest files are deleted first
+  // This helps prevent the recycle bin from consuming too much disk space
+  // Set to 0 to disable size-based cleanup
+  recycleBinMaxSize: parseInt(process.env.RECYCLE_BIN_MAX_SIZE) || 0,
+
 }
 
 if (!fs.existsSync(config.baseDirectory)) {
@@ -208,6 +239,10 @@ if (config.generateThumbnail && !fs.existsSync(config.thumbnailCacheDir)) {
 
 if (config.processPsd && !fs.existsSync(config.psdCacheDir)) {
   fs.mkdirSync(config.psdCacheDir, { recursive: true });
+}
+
+if (config.useRecycleBin && !fs.existsSync(config.recycleBinDirectory)) {
+  fs.mkdirSync(config.recycleBinDirectory, { recursive: true });
 }
 
 module.exports = config;
