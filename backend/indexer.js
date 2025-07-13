@@ -1533,8 +1533,10 @@ module.exports = {
   deleteFromIndex,
   searchIndex,
   findImagesInIndex,
+  findAudiosInIndex,
+  findVideosInIndex,
   getRandomImageFromIndex,
   getDirectoryFiles,
   saveFileBatch,
   buildIndex,
-}; 
+};

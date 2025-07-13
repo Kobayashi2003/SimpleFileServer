@@ -18,7 +18,7 @@ const watcher = require('./watcher');
 // C# indexer manager
 const csharpIndexer = require('./csharp-indexer');
 // auth
-const { authMiddleware, writePermissionMiddleware, createSession, getSession, deleteSession } = require('./auth');
+const { authMiddleware, writePermissionMiddleware } = require('./middleware/auth');
 // logger
 const { apiLoggingMiddleware } = require('./logger');
 // worker threads
@@ -30,6 +30,9 @@ const PSD = require('psd');
 // limit the concurrency of file read
 const pLimit = require('p-limit').default;
 const fileReadLimit = pLimit(100);
+
+const authRoutes = require('./routes/auth')
+const backgroundRoutes = require('./routes/background');
 
 const app = express();
 const PORT = config.port;
@@ -48,228 +51,8 @@ app.get('/api/version', (req, res) => {
   });
 });
 
-app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
-  }
-  
-  // Import validateUser from auth.js
-  const { validateUser } = require('./auth');
-  
-  const userStatus = validateUser(username, password);
-  
-  if (!userStatus.isAuthenticated) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  
-  // Create session and set cookie
-  const sessionId = createSession(userStatus.username, userStatus.permissions);
-  
-  // Set HTTP-only cookie
-  res.cookie('sessionId', sessionId, {
-    httpOnly: true,        // prevent XSS attacks
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    sameSite: 'strict',    // prevent CSRF attacks
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-  });
-  
-  res.json({
-    success: true,
-    username: userStatus.username,
-    permissions: userStatus.permissions
-  });
-});
-
-app.post('/api/logout', (req, res) => {
-  // Delete session if exists
-  const sessionId = req.cookies.sessionId;
-  if (sessionId) {
-    deleteSession(sessionId);
-  }
-  
-  // Clear cookie
-  res.clearCookie('sessionId');
-  
-  res.json({ success: true, message: 'Logged out successfully' });
-});
-
-app.get('/api/validate-session', (req, res) => {
-  // If userRules is not configured, authentication is disabled
-  if (!config.userRules || config.userRules.length === 0) {
-    return res.json({
-      isAuthenticated: true,
-      username: null,
-      permissions: 'rw'
-    });
-  }
-
-  // Check session cookie first
-  const sessionId = req.cookies.sessionId;
-  if (sessionId) {
-    const session = getSession(sessionId);
-    if (session) {
-      return res.json({
-        isAuthenticated: true,
-        username: session.username,
-        permissions: session.permissions
-      });
-    }
-  }
-
-  // Check Basic Auth if no valid session
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Basic ')) {
-    try {
-      const base64Credentials = authHeader.split(' ')[1];
-      const credentials = Buffer.from(base64Credentials, 'base64').toString('utf8');
-      const [username, password] = credentials.split(':');
-      
-      const userStatus = validateUser(username, password);
-      if (userStatus.isAuthenticated) {
-        return res.json({
-          isAuthenticated: true,
-          username: userStatus.username,
-          permissions: userStatus.permissions
-        });
-      }
-    } catch (error) {
-      // Invalid auth header, continue to return unauthenticated
-    }
-  }
-
-  // Return unauthenticated status without triggering browser auth popup
-  return res.json({
-    isAuthenticated: false,
-    username: null,
-    permissions: null
-  });
-});
-
-app.get('/api/bg', (req, res) => {
-  try {
-    // Get the background image path from config
-    const bgImagePath = config.backgroundImagePath;
-
-    // Check if file exists
-    if (!fs.existsSync(bgImagePath)) {
-      console.error(`Background image not found at path: ${bgImagePath}`);
-      return res.status(404).send('Background image not found');
-    }
-
-    // Determine content type based on file extension
-    const ext = path.extname(bgImagePath).toLowerCase();
-    const contentType = utils.getFileTypeByExt(ext);
-
-    if (!contentType.startsWith('image/')) {
-      console.error(`Unsupported file extension: ${ext}`);
-      return res.status(400).send('Unsupported file extension');
-    }
-
-    // Set appropriate headers
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
-
-    // Stream the file to response
-    const stream = fs.createReadStream(bgImagePath);
-    stream.pipe(res);
-  } catch (error) {
-    console.error('Error serving background image:', error);
-    res.status(500).send('Error serving background image');
-  }
-})
-
-app.get('/api/bgs', async (req, res) => {
-  const { width, height } = req.query;
-  const bgDir = path.resolve(config.backgroundImagesDir);
-
-  try {
-    // Check if the background images directory exists
-    if (!fs.existsSync(bgDir)) {
-      fs.mkdirSync(bgDir, { recursive: true });
-      return res.status(404).json({ error: "No background images found" });
-    }
-
-    // Get all files in the background images directory
-    const files = fs.readdirSync(bgDir).filter(file => {
-      const filePath = path.join(bgDir, file);
-      const stats = fs.statSync(filePath);
-      if (!stats.isFile()) return false;
-
-      // Check if it's an image file
-      const ext = path.extname(file).toLowerCase();
-      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
-    });
-
-    if (files.length === 0) {
-      return res.status(404).json({ error: "No background images found" });
-    }
-
-    let selectedImage;
-
-    // If both width and height are provided, find the most suitable image
-    if (width && height) {
-      const targetRatio = parseFloat(width) / parseFloat(height);
-
-      // Get dimensions of all images (this could be optimized by caching)
-      const images = [];
-
-      for (const file of files) {
-        try {
-          const filePath = path.join(bgDir, file);
-          // We'll use Sharp to get image dimensions if available
-          const sharp = require('sharp');
-          const metadata = await sharp(filePath).metadata();
-
-          images.push({
-            path: filePath,
-            filename: file,
-            width: metadata.width,
-            height: metadata.height,
-            ratio: metadata.width / metadata.height
-          });
-        } catch (error) {
-          console.error(`Error processing background image ${file}:`, error);
-          // Skip this file if there's an error
-        }
-      }
-
-      if (images.length === 0) {
-        // Fallback to random if no images could be processed
-        selectedImage = path.join(bgDir, files[Math.floor(Math.random() * files.length)]);
-      } else {
-        // Find the image with the closest aspect ratio
-        images.sort((a, b) => {
-          return Math.abs(a.ratio - targetRatio) - Math.abs(b.ratio - targetRatio);
-        });
-
-        selectedImage = images[0].path;
-      }
-    } else {
-      // If width and height are not provided, select a random image
-      selectedImage = path.join(bgDir, files[Math.floor(Math.random() * files.length)]);
-    }
-
-    // Serve the selected image
-    const ext = path.extname(selectedImage).toLowerCase();
-    const contentType = utils.getFileTypeByExt(ext);
-
-    if (!contentType.startsWith('image/')) {
-      return res.status(400).json({ error: "Selected file is not an image" });
-    }
-
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
-
-    // Stream the file to response
-    const stream = fs.createReadStream(selectedImage);
-    stream.pipe(res);
-  } catch (error) {
-    console.error('Error serving background image:', error);
-    res.status(500).json({ error: 'Error serving background image' });
-  }
-})
+app.use('/api', backgroundRoutes);
+app.use('/api', authRoutes);
 
 app.use(authMiddleware);
 
@@ -2768,10 +2551,6 @@ async function searchFiles(dir, query, basePath) {
   return results;
 }
 
-async function findAllImages(dir, basePath) {
-  return await findAllMediaFiles(dir, basePath, 'image');
-}
-
 async function findAllMediaFiles(dir, basePath, mediaType) {
   let results = [];
 
@@ -2866,18 +2645,6 @@ async function findMediaFilesInDirectory(dir, basePath, mediaType) {
   return results;
 }
 
-async function findImagesInDirectory(dir, basePath) {
-  return await findMediaFilesInDirectory(dir, basePath, 'image');
-}
-
-async function findAudiosInDirectory(dir, basePath) {
-  return await findMediaFilesInDirectory(dir, basePath, 'audio');
-}
-
-async function findVideosInDirectory(dir, basePath) {
-  return await findMediaFilesInDirectory(dir, basePath, 'video');
-}
-
 async function parallelSearch(dir, query, basePath) {
   if (isMainThread) {
     try {
@@ -2942,10 +2709,6 @@ async function parallelFindMedia(dir, basePath, mediaType) {
   }
 }
 
-async function parallelFindImages(dir, basePath) {
-  return await parallelFindMedia(dir, basePath, 'image');
-}
-
 function createSearchWorker(directories, query, basePath) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, {
@@ -2976,10 +2739,6 @@ function createMediaWorker(directories, basePath, mediaType) {
       }
     });
   });
-}
-
-function createImageWorker(directories, basePath) {
-  return createMediaWorker(directories, basePath, 'image');
 }
 
 if (!isMainThread) {

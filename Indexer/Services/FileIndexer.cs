@@ -175,6 +175,33 @@ public class FileIndexer
         }
     }
 
+    public async Task UpdateDirectoryMetadataOnlyAsync(string directoryPath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var dirInfo = new DirectoryInfo(directoryPath);
+            
+            if (!dirInfo.Exists)
+            {
+                // Directory doesn't exist, delete from index
+                var pathToDelete = _useRelativePaths ? GetRelativePath(directoryPath) : directoryPath;
+                _database.DeleteEntry(pathToDelete);
+                _logger.LogDebug("Deleted non-existent directory from index: {Path}", pathToDelete);
+                return;
+            }
+
+            // Only update the directory entry itself, not its contents
+            var dirEntry = await CreateFileEntryAsync(dirInfo, cancellationToken);
+            _database.InsertFileEntry(dirEntry);
+            
+            _logger.LogDebug("Updated directory metadata only: {Path}", directoryPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating directory metadata: {Path}", directoryPath);
+        }
+    }
+
     public void DeleteFileEntry(string filePath)
     {
         try
@@ -337,4 +364,4 @@ public class FileIndexer
             }
         }
     }
-} 
+}
