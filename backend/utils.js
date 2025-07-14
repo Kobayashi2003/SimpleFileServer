@@ -8,8 +8,27 @@ function isRecoverableError(error) {
   return !fatalErrors.includes(error.code);
 }
 
-function normalizePath(filepath) {
-  return filepath.replace(/\\/g, '/');
+function normalizePath(filePath) {
+  return filePath.replace(/\\/g, '/');
+}
+
+function isValidPath(filePath) {
+  if (typeof filePath !== 'string') {
+    return false;
+  }
+  if (filePath.trim() === '') {
+    return false;
+  }
+
+  const fullPath = path.resolve(config.baseDirectory, filePath);
+
+  if (!fullPath.startsWith(path.resolve(config.baseDirectory))) {
+    return false;
+  }
+  if (!fs.existsSync(fullPath)) {
+    return false;
+  }
+  return true;
 }
 
 function getFileTypeByMime(filePath) {
@@ -129,6 +148,7 @@ function safeDeleteDirectory(dirPath) {
 module.exports = {
   isRecoverableError,
   normalizePath,
+  isValidPath,
   getFileType,
   getFileTypeByMime,
   getFileTypeByExt,

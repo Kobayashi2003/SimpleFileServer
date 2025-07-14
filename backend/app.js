@@ -34,6 +34,8 @@ const fileReadLimit = pLimit(100);
 const authRoutes = require('./routes/auth')
 const backgroundRoutes = require('./routes/background');
 
+const downloadRoutes = require('./routes/download');
+
 const app = express();
 const PORT = config.port;
 
@@ -518,55 +520,7 @@ app.get('/api/videos/random', (req, res) => {
   }
 })
 
-app.get('/api/download', (req, res) => {
-  const { path: requestedPath, paths: requestedPaths } = req.query;
-  const basePath = path.resolve(config.baseDirectory);
-
-  if (!requestedPath && !requestedPaths) {
-    return res.status(400).json({ error: 'No path or paths provided' });
-  }
-
-  let pathList = [];
-  if (requestedPath) {
-    pathList.push(path.join(basePath, requestedPath));
-  }
-  if (requestedPaths) {
-    pathList = requestedPaths.split('|').map(p => path.join(basePath, p.trim()));
-  }
-
-  try {
-    const zip = new AdmZip();
-
-    for (const filePath of pathList) {
-
-      if (!fullPath.startsWith(basePath)) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ error: 'File not found' });
-      }
-
-      const stats = fs.statSync(filePath);
-
-      if (stats.isDirectory()) {
-        zip.addLocalFolder(filePath);
-      } else {
-        zip.addLocalFile(filePath);
-      }
-    }
-
-    const zipBuffer = zip.toBuffer();
-    // const fileName = path.basename(pathList[0]);
-    const fileName = new Date().toISOString().replace(/[-:Z]/g, '');
-    const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}.zip`);
-    res.send(zipBuffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+app.use('/api', downloadRoutes);
 
 app.get('/api/raw', async (req, res) => {
   const { path: requestedPath } = req.query;

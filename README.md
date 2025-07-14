@@ -284,6 +284,7 @@ USE_MIME_MAGIC=true
 - [ ] **TODO**:实现VideoOnly与AudioOnly模式
 - [ ] **TODO**:为C# indexer添加monitor的可关闭功能
 - [ ] **TODO**:增加索引的方案，改为不含完整路径，只包含父子关系的结构
+- [ ] **TODO**:将comic的逻辑从raw api中独立出来，变为一个新的api
 
 ## BUG
 

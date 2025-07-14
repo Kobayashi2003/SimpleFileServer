@@ -5,14 +5,17 @@ const express = require('express');
 const router = express.Router();
 
 router.post('/login', (req, res) => {
-  const { username, password } = req.body;
+  const { username: _username, password: _password } = req.body;
+
+  if (typeof _username !== 'string' || typeof _password !== 'string') {
+    return res.status(400).json({ error: 'Username and password must be strings' });
+  }
+
+  const username = _username.trim();
+  const password = _password;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required' });
-  }
-
-  if (typeof username !== 'string' || typeof password !== 'string') {
-    return res.status(400).json({ error: 'Username and password must be strings' });
   }
 
   const userStatus = validateUser(username, password);
