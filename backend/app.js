@@ -33,6 +33,7 @@ const fileReadLimit = pLimit(100);
 
 const authRoutes = require('./routes/auth')
 const backgroundRoutes = require('./routes/background');
+const contentRoutes = require('./routes/content')
 
 const downloadRoutes = require('./routes/download');
 
@@ -593,41 +594,7 @@ app.get('/api/raw', async (req, res) => {
   }
 });
 
-app.get('/api/content', async (req, res) => {
-  const { path: requestedPath } = req.query;
-  const basePath = path.resolve(config.baseDirectory);
-  const fullPath = path.join(basePath, requestedPath);
-
-  if (!fullPath.startsWith(basePath)) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  try {
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    const stats = fs.statSync(fullPath);
-    if (stats.isDirectory()) {
-      return res.status(400).json({ error: 'Cannot show content of a directory' });
-    }
-
-    if (stats.size > config.contentMaxSize) {
-      return res.status(413).json({ error: 'File too large to display' });
-    }
-
-    const contentType = await utils.getFileType(fullPath);
-    if (!contentType.startsWith('text/')) {
-      return res.status(400).json({ error: 'Cannot show content of a non-text file' });
-    }
-    const content = fs.readFileSync(fullPath, 'utf8');
-
-    res.setHeader('Content-Type', contentType);
-    res.send(content);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+app.use('/api', contentRoutes);
 
 app.get('/api/thumbnail', async (req, res) => {
   const { path: requestedPath, width = 300, height, quality = 80 } = req.query;
@@ -1217,11 +1184,6 @@ app.get('/api/comic', async (req, res) => {
     return res.status(500).json({ error: 'Server error' });
   }
 });
-
-app.get('/api/archive', (req, res) => {
-  // TODO: Implement archive endpoint
-})
-
 
 app.post('/api/upload', writePermissionMiddleware, (req, res) => {
   const { dir = '' } = req.query;

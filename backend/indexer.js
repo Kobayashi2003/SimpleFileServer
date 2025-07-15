@@ -324,7 +324,7 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
         // Subdirectory: match direct subfiles and subfolders
         const normalizedPath = directory.endsWith('/') ? directory : `${directory}/`;
         dirPath = `${normalizedPath}%`;
-        excludePattern = `${normalizedPath}%/%`; // exclude deeper paths
+        excludePattern = `${normalizedPath}%/_%`; // exclude deeper paths
       }
     }
 
@@ -345,8 +345,9 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
     } else {
       countSql = SQL.SEARCH_FILES_COUNT_NON_RECURSIVE + typeCondition;
       // countParams = [searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
-      countParams = [searchTerm, dirPath, dirPath, ...typeParams];
+      countParams = [searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
     }
+    console.log({countSql, countParams});
 
     // Get total count for pagination info
     const totalCount = db.prepare(countSql).get(...countParams).count;
@@ -412,6 +413,8 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
       }
     }
 
+    console.log({results});
+
     return {
       results: results.map(file => ({
         ...file,
@@ -458,7 +461,7 @@ function findFilesInIndex(directory = '', fileType = 'all', options = {}) {
       } else {
         const normalizedPath = directory.endsWith('/') ? directory : `${directory}/`;
         dirPath = `${normalizedPath}%`;
-        excludePattern = `${normalizedPath}%/%`;
+        excludePattern = `${normalizedPath}%/_%`;
       }
     }
 
@@ -696,7 +699,7 @@ async function getDirectoryFiles(directory = '', page, limit, sortBy = 'name', s
       // subdirectory: match direct subfiles and subfolders
       const normalizedPath = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
       pathPattern = `${normalizedPath}%`;
-      excludePattern = `${normalizedPath}%/%`; // exclude deeper paths
+      excludePattern = `${normalizedPath}%/_%`; // exclude deeper paths
     }
 
     const totalCount = db.prepare(SQL.COUNT_DIRECTORY_FILES)

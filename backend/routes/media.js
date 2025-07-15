@@ -26,23 +26,3 @@ router.get('/vidios', (req, res) => {
 router.get('/vidios/random', (req, res) => {
 
 });
-
-router.get('/raw', (req, res) => {
-
-});
-
-router.get('/content', (req, res) => {
-
-});
-
-router.get('/thumbnail', (req, res) => {
-
-});
-
-router.get('/comic', (req, res) => {
-
-});
-
-router.get('/archive', (req, res) => {
-
-});

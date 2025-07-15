@@ -12,7 +12,7 @@ function normalizePath(filePath) {
   return filePath.replace(/\\/g, '/');
 }
 
-function isValidPath(filePath) {
+function isValidPath(filePath, isFile=false, isDirectory=false) {
   if (typeof filePath !== 'string') {
     return false;
   }
@@ -26,6 +26,12 @@ function isValidPath(filePath) {
     return false;
   }
   if (!fs.existsSync(fullPath)) {
+    return false;
+  }
+  if (isFile && !fs.statSync(fullPath).isFile()) {
+    return false;
+  }
+  if (isDirectory && !fs.statSync(fullPath).isDirectory()) {
     return false;
   }
   return true;
