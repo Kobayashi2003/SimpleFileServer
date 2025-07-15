@@ -51,7 +51,7 @@ router.post('/logout', (req, res) => {
   res.json({ success: true, message: 'Logged out successfully' });
 });
 
-router.get('validate-session', (req, res) => {
+router.get('/validate-session', (req, res) => {
   if (!config.userRules || config.userRules.length === 0) {
     return res.json({
       isAuthenticated: true,

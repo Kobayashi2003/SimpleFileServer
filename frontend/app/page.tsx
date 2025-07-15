@@ -17,8 +17,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   List as ListIcon, Grid3x3 as Grid3x3Icon, Image as ImageIcon, Search, ArrowLeft, ArrowUp,
-  Download, Upload, Trash2, ClipboardCopy, ClipboardPaste, MoveHorizontal, Database, Eye, 
-  MoreHorizontal, TestTube2, LogIn, LogOut, User, Scissors, CircleCheck, CircleX, ArrowLeftRight, 
+  Download, Upload, Trash2, ClipboardCopy, ClipboardPaste, MoveHorizontal, Database, Eye,
+  MoreHorizontal, TestTube2, LogIn, LogOut, User, Scissors, CircleCheck, CircleX, ArrowLeftRight,
   RefreshCcw, FolderUp, FolderPlus, CheckCheck, Loader2, Square, Home, X, Menu, MousePointer2
 } from "lucide-react";
 
@@ -1359,8 +1359,23 @@ function FileExplorerContent() {
   }, []);
 
   useEffect(() => {
+    // TODO: This useEffect is designed to allow users to close the preview window using the browser's back button.
+    // However, this implementation has limitations. I attempted to add a new history entry when opening the preview
+    // so that the first back button press would close the preview without navigating away from the page (at least it looks like that).
+    // But using pushState means that any existing forward history entries after the current page will be overwritten
+    // by this temporary entry. Additionally, after the back navigation, while the page doesn't change,
+    // a temporary history entry remains in the stack, which is not elegant.
+    // If you have a better idea, please let me know.
+
+    // Add a new history entry when preview opens
+    if (preview.isOpen) {
+      history.pushState({ preview: true }, '', window.location.href);
+    }
+
     const handlePopState = () => {
-      if (isImageOnlyMode) {
+      if (preview.isOpen) {
+        closePreview();
+      } else if (isImageOnlyMode) {
         setIsChangingPath(true);
         setIsImageOnlyMode(false);
       }
@@ -1370,8 +1385,12 @@ function FileExplorerContent() {
 
     return () => {
       window.removeEventListener('popstate', handlePopState);
+
+      if (history.state && history.state.preview) {
+        history.back();
+      }
     };
-  }, [isImageOnlyMode]);
+  }, [isImageOnlyMode, preview.isOpen, closePreview]);
 
   useEffect(() => {
     const handlePopState = () => {

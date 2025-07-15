@@ -701,45 +701,6 @@ export const PreviewBase: React.FC<PreviewBaseProps> = ({
     enableCtrlWheelZoom,
     enableTouchNavigation,
   ]);
-
-
-
-  // TODO: This useEffect is designed to allow users to close the preview window using the browser's back button.
-  // However, this implementation has limitations. I attempted to add a new history entry when opening the preview
-  // so that the first back button press would close the preview without navigating away from the page (at least it looks like that).
-  // But using pushState means that any existing forward history entries after the current page will be overwritten
-  // by this temporary entry. Additionally, after the back navigation, while the page doesn't change,
-  // a temporary history entry remains in the stack, which is not elegant.
-  // If you have a better idea, please let me know.
-
-  // !!!IMPORTANT!!!: If you are running this app in development mode, you should comment out this useEffect.
-
-  // Handle browser back button to close preview - only in production
-  useEffect(() => {
-    // Skip in development mode
-    if (process.env.NODE_ENV === 'development' || !onClose) return;
-    
-    // Add a new history entry when preview opens
-    history.pushState({ preview: true }, '', window.location.href);
-    
-    // Handle popstate event (browser back button)
-    const handlePopState = (event: PopStateEvent) => {
-      // Close the preview
-      onClose();
-    };
-    
-    window.addEventListener('popstate', handlePopState);
-    
-    // Cleanup: remove the event listener
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-
-      if (history.state && history.state.preview) {
-        history.back();
-      }
-    };
-  }, [onClose]);
-
   
   return (
     <div

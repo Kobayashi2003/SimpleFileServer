@@ -301,3 +301,4 @@ USE_MIME_MAGIC=true
 - [x] **BUG**:搜索框的右键点击事件会因被directionMenu拦截而失效
 - [ ] **BUG**:~~非递归搜索时，搜索结果不包括文件夹~~
 - [x] **BUG**:C# indexer的monitor在监测时，若文件夹内的文件有create、delete或者rename（不包括change）事件，会触发其直接父目录的change事件，然而现在的indexer在监测到父目录的change事件后，会对父目录进行递归的rebuild，即便变更的只有父目录。这可能会导致大量无关文件的rebuild，浪费大量的性能，因为此时实际上有的只有一个文件的事件和一个它的父文件夹的change事件。而我之所以需要进行递归处理，是因为在父目录有create delete rename事件时，indexer并不会触发其子项的change事件，但是对与索引的建立来说子项是需要更新的。（我通过加入时间窗口的过滤临时解决了这个问题，但显然的，这个解决方案可能会带来一些问题。真正需要解决问题的话，需要重新设计索引的条目。）
+- [x] **BUG**:关闭preview窗口时，会连带关闭imageOnly模式
