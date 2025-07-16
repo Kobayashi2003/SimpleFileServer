@@ -347,7 +347,6 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
       // countParams = [searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
       countParams = [searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams];
     }
-    console.log({countSql, countParams});
 
     // Get total count for pagination info
     const totalCount = db.prepare(countSql).get(...countParams).count;
@@ -412,8 +411,6 @@ function searchIndex(query, directory = '', page, limit, sortBy = 'name', sortOr
           .all(searchTerm, dirPath, dirPath, excludePattern, excludePattern, ...typeParams);
       }
     }
-
-    console.log({results});
 
     return {
       results: results.map(file => ({
