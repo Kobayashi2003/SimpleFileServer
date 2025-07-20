@@ -9,9 +9,7 @@ public class FileMonitor : IDisposable
     private readonly ILogger<FileMonitor> _logger;
     private FileSystemWatcher? _watcher;
     private readonly Dictionary<string, DateTime> _lastEvents = new();
-    private readonly Dictionary<string, HashSet<string>> _processedChildEvents = new();
     private readonly TimeSpan _debounceInterval = TimeSpan.FromMilliseconds(500);
-    private readonly TimeSpan _aggregationWindow = TimeSpan.FromSeconds(2);
     private readonly object _lockObj = new();
     private bool _disposed;
 
@@ -40,7 +38,7 @@ public class FileMonitor : IDisposable
                               | NotifyFilters.Size,
                 IncludeSubdirectories = true,
                 EnableRaisingEvents = true,
-                InternalBufferSize = 64 * 1024  // 64KB
+                InternalBufferSize = 64 * 1024 * 1024 // 64 MB
             };
 
             _watcher.Changed += OnChanged;
@@ -100,45 +98,6 @@ public class FileMonitor : IDisposable
         }
     }
 
-    private bool HasRecentChildEvents(string directoryPath)
-    {
-        lock (_lockObj)
-        {
-            var now = DateTime.Now;
-            
-            var expiredKeys = _processedChildEvents.Keys
-                .Where(key => !_processedChildEvents[key].Any() || 
-                             _lastEvents.ContainsKey(key) && now - _lastEvents[key] > _aggregationWindow)
-                .ToList();
-            
-            foreach (var key in expiredKeys)
-            {
-                _processedChildEvents.Remove(key);
-            }
-            
-            return _processedChildEvents.ContainsKey(directoryPath) && 
-                   _processedChildEvents[directoryPath].Any();
-        }
-    }
-
-    private void MarkChildEventProcessed(string filePath, string eventType)
-    {
-        var parentPath = Path.GetDirectoryName(filePath);
-        if (string.IsNullOrEmpty(parentPath)) return;
-        
-        lock (_lockObj)
-        {
-            if (!_processedChildEvents.ContainsKey(parentPath))
-            {
-                _processedChildEvents[parentPath] = new HashSet<string>();
-            }
-            
-            _processedChildEvents[parentPath].Add($"{filePath}:{eventType}");
-            
-            _lastEvents[$"child:{parentPath}"] = DateTime.Now;
-        }
-    }
-
     private async void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (e.ChangeType != WatcherChangeTypes.Changed)
@@ -153,23 +112,14 @@ public class FileMonitor : IDisposable
 
         try
         {
-            if (Directory.Exists(e.FullPath))
+            if (Directory.Exists(e.FullPath) || File.Exists(e.FullPath))
             {
-                if (HasRecentChildEvents(e.FullPath))
-                {
-                    await _fileIndexer.UpdateDirectoryMetadataOnlyAsync(e.FullPath);
-                    _logger.LogDebug("Directory changed (metadata only): {Path}", e.FullPath);
-                }
-                else
-                {
-                    await _fileIndexer.UpdateDirectoryEntryAsync(e.FullPath);
-                    _logger.LogDebug("Directory changed (full update): {Path}", e.FullPath);
-                }
+                await _fileIndexer.IndexItemAsync(e.FullPath, recursive: false);
+                _logger.LogDebug("Item metadata updated: {Path}", e.FullPath);
             }
             else
             {
-                await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
-                _logger.LogDebug("File changed: {Path}", e.FullPath);
+                _logger.LogWarning("Changed item no longer exists: {Path}", e.FullPath);
             }
         }
         catch (Exception ex)
@@ -187,10 +137,20 @@ public class FileMonitor : IDisposable
 
         try
         {
-            MarkChildEventProcessed(e.FullPath, "Created");
-            
-            await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
-            _logger.LogDebug("File created: {Path}", e.FullPath);
+            if (Directory.Exists(e.FullPath))
+            {
+                await _fileIndexer.IndexItemAsync(e.FullPath, recursive: true);
+                _logger.LogDebug("Directory created and indexed: {Path}", e.FullPath);
+            }
+            else if (File.Exists(e.FullPath))
+            {
+                await _fileIndexer.IndexItemAsync(e.FullPath, recursive: false);
+                _logger.LogDebug("File created and indexed: {Path}", e.FullPath);
+            }
+            else
+            {
+                _logger.LogWarning("Created item no longer exists: {Path}", e.FullPath);
+            }
         }
         catch (Exception ex)
         {
@@ -207,16 +167,16 @@ public class FileMonitor : IDisposable
 
         try
         {
-            MarkChildEventProcessed(e.FullPath, "Deleted");
+            var isDirectory = _fileIndexer.IsDirectoryInDatabase(e.FullPath);
             
-            if (Directory.Exists(e.FullPath))
+            if (isDirectory == true)
             {
-                _fileIndexer.DeleteDirectoryEntries(e.FullPath);
+                _fileIndexer.DeleteItemEntry(e.FullPath, recursive: true);
                 _logger.LogDebug("Directory deleted: {Path}", e.FullPath);
             }
             else
             {
-                _fileIndexer.DeleteFileEntry(e.FullPath);
+                _fileIndexer.DeleteItemEntry(e.FullPath, recursive: false);
                 _logger.LogDebug("File deleted: {Path}", e.FullPath);
             }
         }
@@ -235,19 +195,22 @@ public class FileMonitor : IDisposable
 
         try
         {
-            MarkChildEventProcessed(e.FullPath, "Renamed");
-            
             if (Directory.Exists(e.FullPath))
             {
-                _fileIndexer.DeleteDirectoryEntries(e.OldFullPath);
-                await _fileIndexer.UpdateDirectoryEntryAsync(e.FullPath);
-                _logger.LogDebug("Directory renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
+                _fileIndexer.DeleteItemEntry(e.OldFullPath, recursive: true);
+                await _fileIndexer.IndexItemAsync(e.FullPath, recursive: true);
+                _logger.LogDebug("Directory renamed and reindexed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
+            }
+            else if (File.Exists(e.FullPath))
+            {
+                _fileIndexer.DeleteItemEntry(e.OldFullPath, recursive: false);
+                await _fileIndexer.IndexItemAsync(e.FullPath, recursive: false);
+                _logger.LogDebug("File renamed and reindexed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
             }
             else
             {
-                _fileIndexer.DeleteFileEntry(e.OldFullPath);
-                await _fileIndexer.UpdateFileEntryAsync(e.FullPath);
-                _logger.LogDebug("File renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
+                _logger.LogWarning("Renamed item no longer exists: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
+                _fileIndexer.DeleteItemEntry(e.OldFullPath, recursive: false);
             }
         }
         catch (Exception ex)
@@ -270,4 +233,4 @@ public class FileMonitor : IDisposable
         }
         GC.SuppressFinalize(this);
     }
-}
+} 

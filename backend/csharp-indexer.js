@@ -148,25 +148,13 @@ class CSharpIndexerManager {
 
     return new Promise((resolve) => {
       let resolved = false;
-      let startupTimer = null;
 
       const resolveOnce = (result) => {
         if (!resolved) {
           resolved = true;
-          if (startupTimer) {
-            clearTimeout(startupTimer);
-          }
           resolve(result);
         }
       };
-
-      // Set up timeout if configured
-      if (config.cSharpIndexerStartupTimeout > 0) {
-        startupTimer = setTimeout(() => {
-          console.warn('C# indexer startup timeout reached');
-          resolveOnce(false);
-        }, config.cSharpIndexerStartupTimeout * 1000);
-      }
 
       // Listen for startup indicators in stdout
       const onData = (data) => {

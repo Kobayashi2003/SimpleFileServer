@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging;
 using NtfsIndexer.Database;
 using NtfsIndexer.Models;
 using NtfsIndexer.Utils;
+using System.Collections.Concurrent;
+using System.Threading.Channels;
 
 namespace NtfsIndexer.Services;
 
@@ -11,20 +13,19 @@ public class FileIndexer
     private readonly ILogger<FileIndexer> _logger;
     private readonly MimeTypeHelper _mimeTypeHelper;
     private readonly string _baseDirectory;
-    private readonly bool _useRelativePaths;
     private int _processedFiles = 0;
     private readonly object _lockObj = new();
+    private readonly int _maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount);
 
-    public FileIndexer(IndexDatabase database, ILogger<FileIndexer> logger, MimeTypeHelper mimeTypeHelper, string baseDirectory, bool useRelativePaths = true)
+    public FileIndexer(IndexDatabase database, ILogger<FileIndexer> logger, MimeTypeHelper mimeTypeHelper, string baseDirectory)
     {
         _database = database;
         _logger = logger;
         _mimeTypeHelper = mimeTypeHelper;
         _baseDirectory = Path.GetFullPath(baseDirectory);
-        _useRelativePaths = useRelativePaths;
         
-        _logger.LogInformation("FileIndexer initialized with base directory: {BaseDirectory}, use relative paths: {UseRelativePaths}", 
-            _baseDirectory, _useRelativePaths);
+        _logger.LogInformation("FileIndexer initialized with base directory: {BaseDirectory}, using relative paths", 
+            _baseDirectory);
     }
 
     public async Task BuildInitialIndexAsync(CancellationToken cancellationToken = default)
@@ -33,30 +34,15 @@ public class FileIndexer
         
         try
         {
-            // Check if index already exists and verify base directory and path format
             var lastBuilt = _database.GetMetadata("last_built");
             var storedBaseDirectory = _database.GetMetadata("base_directory");
-            var storedUseRelativePaths = _database.GetMetadata("use_relative_paths");
             
             if (!string.IsNullOrEmpty(lastBuilt))
             {
-                bool pathFormatChanged = false;
-                if (!string.IsNullOrEmpty(storedUseRelativePaths))
-                {
-                    var previousUseRelativePaths = bool.Parse(storedUseRelativePaths);
-                    pathFormatChanged = previousUseRelativePaths != _useRelativePaths;
-                }
-
                 if (!string.IsNullOrEmpty(storedBaseDirectory) && storedBaseDirectory != _baseDirectory)
                 {
                     _logger.LogWarning("Base directory changed from {OldPath} to {NewPath}. Forcing rebuild...", 
                         storedBaseDirectory, _baseDirectory);
-                }
-                else if (pathFormatChanged)
-                {
-                    _logger.LogWarning("Path format changed from {OldFormat} to {NewFormat}. Forcing rebuild...",
-                        !_useRelativePaths ? "relative" : "absolute",
-                        _useRelativePaths ? "relative" : "absolute");
                 }
                 else
                 {
@@ -66,38 +52,19 @@ public class FileIndexer
                 }
             }
 
-            // Clear existing index and metadata
             _database.ClearIndex();
             _logger.LogInformation("Cleared existing index data");
 
-            var entries = new List<FileEntry>();
-            
-            // Process the root directory
             var rootInfo = new DirectoryInfo(_baseDirectory);
             if (rootInfo.Exists)
             {
-                // Only add root directory to database if not using relative paths
-                if (!_useRelativePaths)
-                {
-                    var rootEntry = await CreateFileEntryAsync(rootInfo, cancellationToken);
-                    entries.Add(rootEntry);
-                    UpdateProgress();
-                }
-
-                // Process all subdirectories and files
-                await ProcessDirectoryAsync(_baseDirectory, entries, cancellationToken);
+                await ProcessDirectoryParallelAsync(_baseDirectory, cancellationToken);
             }
 
-            // Save remaining entries
-            if (entries.Count > 0)
-            {
-                _database.InsertFileEntries(entries);
-            }
-
-            // Update metadata
             _database.UpdateMetadata("last_built", DateTime.Now.ToString("O"));
             _database.UpdateMetadata("base_directory", _baseDirectory);
-            _database.UpdateMetadata("use_relative_paths", _useRelativePaths.ToString());
+            
+            Console.WriteLine($"\rIndex build completed. Total indexed items: {_processedFiles:N0}");
             
             _logger.LogInformation("Initial index build completed. Processed {ProcessedFiles} items", _processedFiles);
         }
@@ -108,125 +75,87 @@ public class FileIndexer
         }
     }
 
-    public async Task UpdateFileEntryAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task IndexItemAsync(string itemPath, bool recursive = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var fileInfo = new FileInfo(filePath);
-            var dirInfo = new DirectoryInfo(filePath);
+            var fileInfo = new FileInfo(itemPath);
+            var dirInfo = new DirectoryInfo(itemPath);
             
             FileSystemInfo fsInfo = fileInfo.Exists ? fileInfo : dirInfo.Exists ? dirInfo : null!;
             
             if (fsInfo == null)
             {
-                // File/directory doesn't exist, delete from index
-                var pathToDelete = _useRelativePaths ? GetRelativePath(filePath) : filePath;
+                var pathToDelete = GetRelativePath(itemPath);
                 _database.DeleteEntry(pathToDelete);
-                _logger.LogDebug("Deleted non-existent file from index: {Path}", pathToDelete);
+                _logger.LogDebug("Deleted non-existent item from index: {Path}", pathToDelete);
                 return;
             }
 
-            var entry = await CreateFileEntryAsync(fsInfo, cancellationToken);
-            _database.InsertFileEntry(entry);
-            
-            _logger.LogDebug("Updated index entry: {Path}", entry.FullPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating file entry: {Path}", filePath);
-        }
-    }
-
-    public async Task UpdateDirectoryEntryAsync(string directoryPath, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var entries = new List<FileEntry>();
-            var dirInfo = new DirectoryInfo(directoryPath);
-            
-            if (!dirInfo.Exists)
+            if (fsInfo is DirectoryInfo && recursive)
             {
-                // Directory doesn't exist, delete from index
-                var pathToDelete = _useRelativePaths ? GetRelativePath(directoryPath) : directoryPath;
-                _database.DeleteEntriesWithPrefix(pathToDelete);
-                _logger.LogDebug("Deleted non-existent directory from index: {Path}", pathToDelete);
-                return;
+                await IndexDirectoryRecursively(itemPath, cancellationToken);
             }
-
-            // Add the directory entry itself
-            var dirEntry = await CreateFileEntryAsync(dirInfo, cancellationToken);
-            entries.Add(dirEntry);
-            UpdateProgress();
-
-            // Process all contents recursively
-            await ProcessDirectoryAsync(directoryPath, entries, cancellationToken);
-
-            // Save all entries
-            if (entries.Count > 0)
+            else
             {
-                _database.InsertFileEntries(entries);
+                var entry = await CreateFileEntryAsync(fsInfo, cancellationToken);
+                _database.InsertFileEntry(entry);
+                _logger.LogDebug("Indexed item: {Path}", entry.Path);
             }
-            
-            _logger.LogDebug("Updated directory entry and its contents: {Path}", directoryPath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating directory entry: {Path}", directoryPath);
+            _logger.LogError(ex, "Error indexing item: {Path}", itemPath);
         }
     }
 
-    public async Task UpdateDirectoryMetadataOnlyAsync(string directoryPath, CancellationToken cancellationToken = default)
+    private async Task IndexDirectoryRecursively(string directoryPath, CancellationToken cancellationToken)
     {
-        try
+        var entries = new List<FileEntry>();
+        var dirInfo = new DirectoryInfo(directoryPath);
+        
+        if (!dirInfo.Exists)
         {
-            var dirInfo = new DirectoryInfo(directoryPath);
-            
-            if (!dirInfo.Exists)
-            {
-                // Directory doesn't exist, delete from index
-                var pathToDelete = _useRelativePaths ? GetRelativePath(directoryPath) : directoryPath;
-                _database.DeleteEntry(pathToDelete);
-                _logger.LogDebug("Deleted non-existent directory from index: {Path}", pathToDelete);
-                return;
-            }
-
-            // Only update the directory entry itself, not its contents
-            var dirEntry = await CreateFileEntryAsync(dirInfo, cancellationToken);
-            _database.InsertFileEntry(dirEntry);
-            
-            _logger.LogDebug("Updated directory metadata only: {Path}", directoryPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating directory metadata: {Path}", directoryPath);
-        }
-    }
-
-    public void DeleteFileEntry(string filePath)
-    {
-        try
-        {
-            var pathToDelete = _useRelativePaths ? GetRelativePath(filePath) : filePath;
-            _database.DeleteEntry(pathToDelete);
-            _logger.LogDebug("Deleted file entry: {Path}", pathToDelete);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error deleting file entry: {Path}", filePath);
-        }
-    }
-
-    public void DeleteDirectoryEntries(string directoryPath)
-    {
-        try
-        {
-            var pathToDelete = _useRelativePaths ? GetRelativePath(directoryPath) : directoryPath;
+            var pathToDelete = GetRelativePath(directoryPath);
             _database.DeleteEntriesWithPrefix(pathToDelete);
-            _logger.LogDebug("Deleted directory entries: {Path}", pathToDelete);
+            _logger.LogDebug("Deleted non-existent directory from index: {Path}", pathToDelete);
+            return;
+        }
+
+        var dirEntry = await CreateFileEntryAsync(dirInfo, cancellationToken);
+        entries.Add(dirEntry);
+        UpdateProgress();
+
+        await ProcessDirectoryAsync(directoryPath, entries, cancellationToken);
+
+        if (entries.Count > 0)
+        {
+            _database.InsertFileEntries(entries);
+        }
+        
+        _logger.LogDebug("Indexed directory recursively: {Path}", directoryPath);
+    }
+
+    public void DeleteItemEntry(string itemPath, bool recursive = false)
+    {
+        try
+        {
+            var pathToDelete = GetRelativePath(itemPath);
+            
+            if (recursive)
+            {
+                _database.DeleteEntriesWithPrefix(pathToDelete);
+                _logger.LogDebug("Deleted item and all subentries: {Path}", pathToDelete);
+            }
+            else
+            {
+                _database.DeleteEntry(pathToDelete);
+                _logger.LogDebug("Deleted single item entry: {Path}", pathToDelete);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deleting directory entries: {Path}", directoryPath);
+            _logger.LogError(ex, "Error deleting item entry: {Path}", itemPath);
         }
     }
 
@@ -235,25 +164,11 @@ public class FileIndexer
         var entry = new FileEntry
         {
             FileName = fsInfo.Name,
-            Extension = Path.GetExtension(fsInfo.Name).ToLowerInvariant(),
-            CreationTime = fsInfo.CreationTime,
             LastWriteTime = fsInfo.LastWriteTime,
-            LastAccessTime = fsInfo.LastAccessTime,
-            IsDirectory = fsInfo is DirectoryInfo,
-            Attributes = fsInfo.Attributes,
-            IndexedTime = DateTime.Now
+            IsDirectory = fsInfo is DirectoryInfo
         };
 
-        if (_useRelativePaths)
-        {
-            entry.FullPath = GetRelativePath(fsInfo.FullName);
-            entry.ParentPath = GetRelativePath(Path.GetDirectoryName(fsInfo.FullName));
-        }
-        else
-        {
-            entry.FullPath = fsInfo.FullName;
-            entry.ParentPath = Path.GetDirectoryName(fsInfo.FullName);
-        }
+        entry.Path = GetRelativePath(fsInfo.FullName);
 
         if (fsInfo is FileInfo fileInfo)
         {
@@ -273,7 +188,6 @@ public class FileIndexer
     {
         try
         {
-            // Process all files in the current directory
             foreach (var file in Directory.GetFiles(path))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -283,7 +197,6 @@ public class FileIndexer
                 entries.Add(entry);
                 UpdateProgress();
 
-                // Save in batches to avoid memory issues
                 if (entries.Count >= 1000)
                 {
                     _database.InsertFileEntries(entries);
@@ -291,7 +204,6 @@ public class FileIndexer
                 }
             }
 
-            // Process all subdirectories
             foreach (var dir in Directory.GetDirectories(path))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -301,7 +213,6 @@ public class FileIndexer
                 entries.Add(entry);
                 UpdateProgress();
 
-                // Recursively process subdirectories
                 await ProcessDirectoryAsync(dir, entries, cancellationToken);
             }
         }
@@ -321,35 +232,43 @@ public class FileIndexer
         
         try
         {
-            // Normalize both paths to ensure consistent comparison
             var normalizedAbsolutePath = Path.GetFullPath(absolutePath);
             var normalizedBaseDirectory = Path.GetFullPath(_baseDirectory);
             
-            // Ensure both paths end with directory separator for consistent comparison
             if (!normalizedBaseDirectory.EndsWith(Path.DirectorySeparatorChar))
             {
                 normalizedBaseDirectory += Path.DirectorySeparatorChar;
             }
             
-            // Also ensure absolute path ends with separator if it's a directory
-            if (Directory.Exists(normalizedAbsolutePath) && !normalizedAbsolutePath.EndsWith(Path.DirectorySeparatorChar))
-            {
-                normalizedAbsolutePath += Path.DirectorySeparatorChar;
-            }
-            
             if (normalizedAbsolutePath.StartsWith(normalizedBaseDirectory, StringComparison.OrdinalIgnoreCase))
             {
                 var relativePath = normalizedAbsolutePath.Substring(normalizedBaseDirectory.Length);
-                return relativePath.Replace('\\', '/');
+                relativePath = relativePath.Replace('\\', '/').TrimEnd('/');
+                return relativePath;
             }
             
             _logger.LogWarning("Path {Path} is not under base directory {BaseDirectory}", absolutePath, _baseDirectory);
-            return absolutePath.Replace('\\', '/');
+            return absolutePath.Replace('\\', '/').TrimEnd('/');
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error converting path {Path} to relative path", absolutePath);
-            return absolutePath.Replace('\\', '/');
+            return absolutePath.Replace('\\', '/').TrimEnd('/');
+        }
+    }
+
+    public bool? IsDirectoryInDatabase(string absolutePath)
+    {
+        try
+        {
+            var pathToQuery = GetRelativePath(absolutePath);
+            var entry = _database.GetEntry(pathToQuery);
+            return entry?.IsDirectory;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking directory status for path: {Path}", absolutePath);
+            return null;
         }
     }
 
@@ -362,6 +281,153 @@ public class FileIndexer
             {
                 Console.Write($"\rProcessed: {_processedFiles:N0} items");
             }
+        }
+    }
+
+    private async Task ProcessDirectoryParallelAsync(string rootPath, CancellationToken cancellationToken)
+    {
+        const int batchSize = 1000;
+        const int channelCapacity = 10000;
+
+        var channel = Channel.CreateBounded<FileEntry>(channelCapacity);
+        var writer = channel.Writer;
+        var reader = channel.Reader;
+
+        var writerTask = Task.Run(async () =>
+        {
+            var batch = new List<FileEntry>(batchSize);
+            
+            await foreach (var entry in reader.ReadAllAsync(cancellationToken))
+            {
+                batch.Add(entry);
+                
+                if (batch.Count >= batchSize)
+                {
+                    _database.InsertFileEntries(batch);
+                    batch.Clear();
+                }
+            }
+            
+            if (batch.Count > 0)
+            {
+                _database.InsertFileEntries(batch);
+            }
+        }, cancellationToken);
+
+        try
+        {
+            var directories = new ConcurrentQueue<string>();
+            directories.Enqueue(rootPath);
+            
+            await ProcessDirectoryFilesAsync(rootPath, writer, cancellationToken);
+            
+            var processedDirs = new ConcurrentBag<string>();
+            
+            await Task.Run(async () =>
+            {
+                var parallelOptions = new ParallelOptions
+                {
+                    CancellationToken = cancellationToken,
+                    MaxDegreeOfParallelism = _maxDegreeOfParallelism
+                };
+
+                await Parallel.ForEachAsync(
+                    GetAllDirectoriesAsync(rootPath, cancellationToken),
+                    parallelOptions,
+                    async (directory, ct) =>
+                    {
+                        try
+                        {
+                            await ProcessDirectoryFilesAsync(directory, writer, ct);
+                            processedDirs.Add(directory);
+                        }
+                        catch (UnauthorizedAccessException ex)
+                        {
+                            _logger.LogWarning("Access denied to directory: {Path} - {Message}", directory, ex.Message);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error processing directory: {Path}", directory);
+                        }
+                    });
+            }, cancellationToken);
+        }
+        finally
+        {
+            writer.Complete();
+            await writerTask;
+        }
+    }
+
+    private async IAsyncEnumerable<string> GetAllDirectoriesAsync(string rootPath, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var queue = new Queue<string>();
+        queue.Enqueue(rootPath);
+
+        while (queue.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            var currentDir = queue.Dequeue();
+            yield return currentDir;
+
+            try
+            {
+                await Task.Yield();
+                
+                foreach (var subDir in Directory.GetDirectories(currentDir))
+                {
+                    queue.Enqueue(subDir);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Skip directories without access permission
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error enumerating directory: {Path}", currentDir);
+            }
+        }
+    }
+
+    private async Task ProcessDirectoryFilesAsync(string directoryPath, ChannelWriter<FileEntry> writer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dirInfo = new DirectoryInfo(directoryPath);
+            if (!dirInfo.Exists) return;
+
+            var dirEntry = await CreateFileEntryAsync(dirInfo, cancellationToken);
+            await writer.WriteAsync(dirEntry, cancellationToken);
+            UpdateProgress();
+
+            var fileTasks = Directory.GetFiles(directoryPath)
+                .Select(async filePath =>
+                {
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var fileInfo = new FileInfo(filePath);
+                        var entry = await CreateFileEntryAsync(fileInfo, cancellationToken);
+                        await writer.WriteAsync(entry, cancellationToken);
+                        UpdateProgress();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing file: {Path}", filePath);
+                    }
+                });
+
+            await Task.WhenAll(fileTasks);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning("Access denied to directory: {Path} - {Message}", directoryPath, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing directory files: {Path}", directoryPath);
         }
     }
 }

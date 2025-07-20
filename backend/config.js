@@ -163,8 +163,6 @@ const config = {
   // true: Always delete existing database and rebuild from scratch
   // false: Reuse existing index if available, only build if no index exists
   cSharpIndexerForceRebuild: process.env.CSHARP_INDEXER_FORCE_REBUILD === 'true' || false,
-  // Timeout in seconds to wait for C# indexer startup (0 = no timeout)
-  cSharpIndexerStartupTimeout: parseInt(process.env.CSHARP_INDEXER_STARTUP_TIMEOUT) || 30,
   // Whether to automatically restart C# indexer if it crashes
   cSharpIndexerAutoRestart: process.env.CSHARP_INDEXER_AUTO_RESTART !== 'false', // default true
   // Maximum number of restart attempts

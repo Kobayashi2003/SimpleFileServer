@@ -167,7 +167,7 @@ class Program
 
             using var database = new IndexDatabase(dbPath, dbLogger);
             var mimeTypeHelper = new MimeTypeHelper(mimeLogger);
-            var indexer = new FileIndexer(database, indexerLogger, mimeTypeHelper, path, useRelativePaths: true);
+            var indexer = new FileIndexer(database, indexerLogger, mimeTypeHelper, path);
 
             var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (_, e) =>
@@ -207,7 +207,7 @@ class Program
             
             using var database = new IndexDatabase(dbPath, dbLogger);
             var mimeTypeHelper = new MimeTypeHelper(mimeLogger);
-            var indexer = new FileIndexer(database, indexerLogger, mimeTypeHelper, path, useRelativePaths: true);
+            var indexer = new FileIndexer(database, indexerLogger, mimeTypeHelper, path);
             using var monitor = new FileMonitor(indexer, monitorLogger);
 
             monitor.StartMonitoring(path);
@@ -265,7 +265,7 @@ class Program
             {
                 var sizeText = result.IsDirectory ? "[DIR]" : $"{result.Size:N0} bytes";
                 Console.WriteLine($"{result.FileName}");
-                Console.WriteLine($"  Path: {result.FullPath}");
+                Console.WriteLine($"  Path: {result.Path}");
                 Console.WriteLine($"  Size: {sizeText}");
                 Console.WriteLine($"  Type: {result.MimeType}");
                 Console.WriteLine($"  Modified: {result.LastWriteTime:yyyy-MM-dd HH:mm:ss}");
@@ -298,7 +298,6 @@ class Program
             var totalFiles = database.GetTotalFileCount();
             var lastBuilt = database.GetMetadata("last_built");
             var baseDirectory = database.GetMetadata("base_directory");
-            var useRelativePaths = database.GetMetadata("use_relative_paths");
             var dbVersion = database.GetMetadata("db_version");
 
             Console.WriteLine("NTFS Indexer Status");
@@ -307,7 +306,7 @@ class Program
             Console.WriteLine($"Database Version: {dbVersion ?? "Unknown"}");
             Console.WriteLine($"Total Files Indexed: {totalFiles:N0}");
             Console.WriteLine($"Base Directory: {baseDirectory ?? "Unknown"}");
-            Console.WriteLine($"Use Relative Paths: {useRelativePaths ?? "Unknown"}");
+            Console.WriteLine($"Path Format: Relative (based on base directory)");
             Console.WriteLine($"Last Full Index: {(lastBuilt != null ? DateTime.Parse(lastBuilt).ToString("yyyy-MM-dd HH:mm:ss") : "Never")}");
             Console.WriteLine($"Database Size: {new FileInfo(dbPath).Length / 1024.0 / 1024.0:F2} MB");
         }

@@ -8,6 +8,7 @@ public class IndexDatabase : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly ILogger<IndexDatabase> _logger;
+    private readonly object _lockObj = new();
     private bool _disposed;
 
     public IndexDatabase(string dbPath, ILogger<IndexDatabase> logger)
@@ -40,26 +41,17 @@ public class IndexDatabase : IDisposable
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 path TEXT NOT NULL UNIQUE,
-                extension TEXT,
                 size INTEGER NOT NULL,
-                ctime TEXT NOT NULL,
                 mtime TEXT NOT NULL,
-                atime TEXT NOT NULL,
                 mimeType TEXT NOT NULL,
-                filehash TEXT,
-                isDirectory INTEGER NOT NULL,
-                parentpath TEXT,
-                attributes INTEGER NOT NULL,
-                indexedtime TEXT NOT NULL
+                isDirectory INTEGER NOT NULL
             );
             
             CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
             CREATE INDEX IF NOT EXISTS idx_files_name ON files(name);
-            CREATE INDEX IF NOT EXISTS idx_files_extension ON files(extension);
-            CREATE INDEX IF NOT EXISTS idx_files_mimeType ON files(mimeType);
-            CREATE INDEX IF NOT EXISTS idx_files_parentpath ON files(parentpath);
-            CREATE INDEX IF NOT EXISTS idx_files_isDirectory ON files(isDirectory);
             CREATE INDEX IF NOT EXISTS idx_files_mtime ON files(mtime);
+            CREATE INDEX IF NOT EXISTS idx_files_mimeType ON files(mimeType);
+            CREATE INDEX IF NOT EXISTS idx_files_isDirectory ON files(isDirectory);
             
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
@@ -76,49 +68,62 @@ public class IndexDatabase : IDisposable
 
     public void InsertFileEntry(FileEntry entry)
     {
-        using var command = _connection.CreateCommand();
-        command.CommandText = @"
-            INSERT OR REPLACE INTO files 
-            (name, path, extension, size, ctime, mtime, atime, 
-             mimeType, filehash, isDirectory, parentpath, attributes, indexedtime)
-            VALUES 
-            (@name, @path, @extension, @size, @ctime, @mtime, @atime,
-             @mimeType, @filehash, @isDirectory, @parentpath, @attributes, @indexedtime)";
+        lock (_lockObj)
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText = @"
+                INSERT OR REPLACE INTO files 
+                (name, path, size, mtime, mimeType, isDirectory)
+                VALUES 
+                (@name, @path, @size, @mtime, @mimeType, @isDirectory)";
 
-        command.Parameters.AddWithValue("@name", entry.FileName);
-        command.Parameters.AddWithValue("@path", entry.FullPath);
-        command.Parameters.AddWithValue("@extension", entry.Extension);
-        command.Parameters.AddWithValue("@size", entry.Size);
-        command.Parameters.AddWithValue("@ctime", entry.CreationTime.ToString("O"));
-        command.Parameters.AddWithValue("@mtime", entry.LastWriteTime.ToString("O"));
-        command.Parameters.AddWithValue("@atime", entry.LastAccessTime.ToString("O"));
-        command.Parameters.AddWithValue("@mimeType", entry.MimeType);
-        command.Parameters.AddWithValue("@filehash", entry.FileHash ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@isDirectory", entry.IsDirectory ? 1 : 0);
-        command.Parameters.AddWithValue("@parentpath", entry.ParentPath ?? (object)DBNull.Value);
-        command.Parameters.AddWithValue("@attributes", (int)entry.Attributes);
-        command.Parameters.AddWithValue("@indexedtime", entry.IndexedTime.ToString("O"));
+            command.Parameters.AddWithValue("@name", entry.FileName);
+            command.Parameters.AddWithValue("@path", entry.Path);
+            command.Parameters.AddWithValue("@size", entry.Size);
+            command.Parameters.AddWithValue("@mtime", entry.LastWriteTime.ToString("O"));
+            command.Parameters.AddWithValue("@mimeType", entry.MimeType);
+            command.Parameters.AddWithValue("@isDirectory", entry.IsDirectory ? 1 : 0);
 
-        command.ExecuteNonQuery();
+            command.ExecuteNonQuery();
+        }
     }
 
     public void InsertFileEntries(IEnumerable<FileEntry> entries)
     {
-        using var transaction = _connection.BeginTransaction();
-        try
+        lock (_lockObj)
         {
-            foreach (var entry in entries)
+            using var transaction = _connection.BeginTransaction();
+            try
             {
-                InsertFileEntry(entry);
+                using var command = _connection.CreateCommand();
+                command.CommandText = @"
+                    INSERT OR REPLACE INTO files 
+                    (name, path, size, mtime, mimeType, isDirectory)
+                    VALUES 
+                    (@name, @path, @size, @mtime, @mimeType, @isDirectory)";
+                
+                foreach (var entry in entries)
+                {
+                    command.Parameters.Clear();
+                    command.Parameters.AddWithValue("@name", entry.FileName);
+                    command.Parameters.AddWithValue("@path", entry.Path);
+                    command.Parameters.AddWithValue("@size", entry.Size);
+                    command.Parameters.AddWithValue("@mtime", entry.LastWriteTime.ToString("O"));
+                    command.Parameters.AddWithValue("@mimeType", entry.MimeType);
+                    command.Parameters.AddWithValue("@isDirectory", entry.IsDirectory ? 1 : 0);
+                    
+                    command.ExecuteNonQuery();
+                }
+                
+                transaction.Commit();
+                _logger.LogDebug("Batch insert completed successfully");
             }
-            transaction.Commit();
-            _logger.LogDebug("Batch insert completed successfully");
-        }
-        catch (Exception ex)
-        {
-            transaction.Rollback();
-            _logger.LogError(ex, "Error during batch insert");
-            throw;
+            catch (Exception ex)
+            {
+                transaction.Rollback();
+                _logger.LogError(ex, "Error during batch insert");
+                throw;
+            }
         }
     }
 
@@ -146,8 +151,8 @@ public class IndexDatabase : IDisposable
         }
         
         command.CommandText = "DELETE FROM files WHERE path = @exactPath OR path LIKE @prefix";
-        command.Parameters.AddWithValue("@exactPath", pathPrefix); // Delete the directory itself
-        command.Parameters.AddWithValue("@prefix", $"{normalizedPrefix}%"); // Delete all contents
+        command.Parameters.AddWithValue("@exactPath", pathPrefix);
+        command.Parameters.AddWithValue("@prefix", $"{normalizedPrefix}%");
         
         var rowsAffected = command.ExecuteNonQuery();
         
@@ -162,12 +167,11 @@ public class IndexDatabase : IDisposable
         using var transaction = _connection.BeginTransaction();
         try
         {
-            // Clear all files
+            // Clear all files and reset metadata
             using var deleteFilesCommand = _connection.CreateCommand();
             deleteFilesCommand.CommandText = "DELETE FROM files";
             deleteFilesCommand.ExecuteNonQuery();
 
-            // Clear the 'last_built' metadata to indicate the index is no longer built
             using var updateMetadataCommand = _connection.CreateCommand();
             updateMetadataCommand.CommandText = "DELETE FROM metadata WHERE key = 'last_built'";
             updateMetadataCommand.ExecuteNonQuery();
@@ -253,18 +257,11 @@ public class IndexDatabase : IDisposable
         {
             Id = reader.GetInt64(reader.GetOrdinal("id")),
             FileName = reader.GetString(reader.GetOrdinal("name")),
-            FullPath = reader.GetString(reader.GetOrdinal("path")),
-            Extension = reader.IsDBNull(reader.GetOrdinal("extension")) ? string.Empty : reader.GetString(reader.GetOrdinal("extension")),
+            Path = reader.GetString(reader.GetOrdinal("path")),
             Size = reader.GetInt64(reader.GetOrdinal("size")),
-            CreationTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("ctime"))),
             LastWriteTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("mtime"))),
-            LastAccessTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("atime"))),
             MimeType = reader.GetString(reader.GetOrdinal("mimeType")),
-            FileHash = reader.IsDBNull(reader.GetOrdinal("filehash")) ? null : reader.GetString(reader.GetOrdinal("filehash")),
-            IsDirectory = reader.GetInt32(reader.GetOrdinal("isDirectory")) == 1,
-            ParentPath = reader.IsDBNull(reader.GetOrdinal("parentpath")) ? null : reader.GetString(reader.GetOrdinal("parentpath")),
-            Attributes = (FileAttributes)reader.GetInt32(reader.GetOrdinal("attributes")),
-            IndexedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("indexedtime")))
+            IsDirectory = reader.GetInt32(reader.GetOrdinal("isDirectory")) == 1
         };
     }
 
