@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import { FixedSizeGrid as Grid } from 'react-window';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { FileItemGridView, ImageItem, VideoItem, EPUBItem } from "@/components/fileItem";
-import { cn } from "@/lib/utils";
+import { cn, getPreviewType } from "@/lib/utils";
 import {
   Info, Check, Edit, ClipboardCopy, Scissors, Download, Trash2, X
 } from "lucide-react";
@@ -109,6 +109,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
   if (index >= files.length) return null;
 
   const file = files[index];
+  const type = file.isDirectory ? 'directory' : getPreviewType(file.mimeType || 'application/octet-stream');
   const isSelected = isSelecting && selectedFiles.includes(file.path);
   const isFocused = focusedIndex === index;
 
@@ -122,7 +123,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
     isFocused && "border-2 border-yellow-500"
   );
 
-  if (file.mimeType?.startsWith('image/')) {
+  if (type === 'image') {
     return (
       <div style={style} className="p-1">
         <FileContextMenu
@@ -149,7 +150,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
         </FileContextMenu>
       </div>
     );
-  } else if (file.mimeType?.startsWith('video/')) {
+  } else if (type === 'video') {
     return (
       <div style={style} className="p-1">
         <FileContextMenu
@@ -174,7 +175,7 @@ const ImageCell = React.memo(({ columnIndex, rowIndex, style, data }: ImageCellP
         </FileContextMenu>
       </div>
     )
-  } else if (file.mimeType === 'application/epub') {
+  } else if (type === 'epub') {
     return (
       <div style={style} className="p-1">
         <FileContextMenu

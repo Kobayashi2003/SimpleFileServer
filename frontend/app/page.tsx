@@ -1358,22 +1358,31 @@ function FileExplorerContent() {
     };
   }, []);
 
+
+  // TODO: I attempted to allow users to close the preview window using the browser's back button.
+  // However, this implementation has limitations. I attempted to add a new history entry when opening the preview
+  // so that the first back button press would close the preview without navigating away from the page (at least it looks like that).
+  // But using pushState means that any existing forward history entries after the current page will be overwritten
+  // by this temporary entry. Additionally, after the back navigation, while the page doesn't change,
+  // a temporary history entry remains in the stack, which is not elegant.
+  // If you have a better idea, please let me know.
+
+  const previewIsOpenRef = useRef(preview.isOpen);
+
   useEffect(() => {
-    // TODO: This useEffect is designed to allow users to close the preview window using the browser's back button.
-    // However, this implementation has limitations. I attempted to add a new history entry when opening the preview
-    // so that the first back button press would close the preview without navigating away from the page (at least it looks like that).
-    // But using pushState means that any existing forward history entries after the current page will be overwritten
-    // by this temporary entry. Additionally, after the back navigation, while the page doesn't change,
-    // a temporary history entry remains in the stack, which is not elegant.
-    // If you have a better idea, please let me know.
+    previewIsOpenRef.current = preview.isOpen;
 
     // Add a new history entry when preview opens
     if (preview.isOpen) {
       history.pushState({ preview: true }, '', window.location.href);
     }
 
+  }, [preview.isOpen]);
+
+  useEffect(() => {
+
     const handlePopState = () => {
-      if (preview.isOpen) {
+      if (previewIsOpenRef.current) {
         closePreview();
       } else if (isImageOnlyMode) {
         setIsChangingPath(true);
@@ -1390,7 +1399,7 @@ function FileExplorerContent() {
         history.back();
       }
     };
-  }, [isImageOnlyMode, preview.isOpen, closePreview]);
+  }, [isImageOnlyMode, closePreview]);
 
   useEffect(() => {
     const handlePopState = () => {
