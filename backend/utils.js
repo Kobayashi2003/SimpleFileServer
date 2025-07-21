@@ -12,18 +12,18 @@ function normalizePath(filePath) {
   return filePath.replace(/\\/g, '/');
 }
 
-function checkPath(path, isFile=false, isDirectory=false) {
-  if (typeof path !== 'string') {
+function checkPath(filePath, isFile=false, isDirectory=false) {
+  if (typeof filePath !== 'string') {
     return false;
   }
-  if (path.trim() === '') { // root directory
+  if (filePath.trim() === '') { // root directory
     if (!isFile) {
       return true;
     }
     return false;
   }
 
-  const fullPath = path.resolve(config.baseDirectory, path);
+  const fullPath = path.resolve(config.baseDirectory, filePath);
 
   if (!fullPath.startsWith(path.resolve(config.baseDirectory))) {
     return false;
@@ -40,12 +40,12 @@ function checkPath(path, isFile=false, isDirectory=false) {
   return true;
 }
 
-function isValidPath(path) {
-  return checkPath(path, false, false);
+function isValidPath(filePath) {
+  return checkPath(filePath, false, false);
 }
 
-function isValidFilePath(path) {
-  return checkPath(path, true, false);
+function isValidFilePath(filePath) {
+  return checkPath(filePath, true, false);
 }
 
 function isValidDirectoryPath(path) {
