@@ -1368,6 +1368,7 @@ function FileExplorerContent() {
   // If you have a better idea, please let me know.
 
   const previewIsOpenRef = useRef(preview.isOpen);
+  const isManualBackRef = useRef(false);
 
   useEffect(() => {
     previewIsOpenRef.current = preview.isOpen;
@@ -1375,6 +1376,9 @@ function FileExplorerContent() {
     // Add a new history entry when preview opens
     if (preview.isOpen) {
       history.pushState({ preview: true }, '', window.location.href);
+    } else if (history.state && history.state.preview) {
+      isManualBackRef.current = true;
+      history.back();
     }
 
   }, [preview.isOpen]);
@@ -1382,6 +1386,12 @@ function FileExplorerContent() {
   useEffect(() => {
 
     const handlePopState = () => {
+
+      if (isManualBackRef.current) {
+        isManualBackRef.current = false;
+        return;
+      }
+
       if (previewIsOpenRef.current) {
         closePreview();
       } else if (isImageOnlyMode) {
@@ -1394,10 +1404,6 @@ function FileExplorerContent() {
 
     return () => {
       window.removeEventListener('popstate', handlePopState);
-
-      if (history.state && history.state.preview) {
-        history.back();
-      }
     };
   }, [isImageOnlyMode, closePreview]);
 

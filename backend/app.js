@@ -6,9 +6,7 @@ const path = require('path')
 const cors = require('cors')
 const cookieParser = require('cookie-parser');
 const utils = require('./utils');
-// handle zip and rar files
-const AdmZip = require('adm-zip')
-const unrar = require('node-unrar-js');
+
 // handle file uploads
 const multer = require('multer')
 // indexer
@@ -23,10 +21,7 @@ const { authMiddleware, writePermissionMiddleware } = require('./middleware/auth
 const { apiLoggingMiddleware } = require('./logger');
 // worker threads
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
-// For PSD file processing
-const { execSync } = require('child_process');
-const crypto = require('crypto');
-const PSD = require('psd');
+
 // limit the concurrency of file read
 const pLimit = require('p-limit').default;
 const fileReadLimit = pLimit(100);
@@ -34,8 +29,9 @@ const fileReadLimit = pLimit(100);
 const authRoutes = require('./routes/auth')
 const backgroundRoutes = require('./routes/background');
 const contentRoutes = require('./routes/content')
-
 const downloadRoutes = require('./routes/download');
+const uploadRoutes = require('./routes/upload');
+
 
 const app = express();
 const PORT = config.port;
@@ -521,251 +517,9 @@ app.get('/api/videos/random', (req, res) => {
   }
 })
 
-app.use('/api', downloadRoutes);
-
-app.get('/api/raw', async (req, res) => {
-  const { path: requestedPath } = req.query;
-  const basePath = path.resolve(config.baseDirectory);
-
-  // Detect if this is an absolute path (temp file) or relative path
-  let fullPath;
-  const tempDirPrefix = 'comic-extract-';
-
-  // Check if it's a temp comic file path
-  const isTempComicFile = requestedPath.includes(tempDirPrefix);
-
-  if (isTempComicFile) {
-    // For temp files, use the path directly
-    fullPath = requestedPath;
-  } else {
-    // Regular case - relative path from base directory
-    fullPath = path.join(basePath, requestedPath);
-  }
-
-  // Only prevent access to non-temp files outside the base directory
-  if (!fullPath.startsWith(basePath) && !isTempComicFile) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  try {
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    const stats = fs.statSync(fullPath);
-    if (stats.isDirectory()) {
-      const zip = new AdmZip();
-      zip.addLocalFolder(fullPath);
-      const zipBuffer = zip.toBuffer();
-      const fileName = path.basename(fullPath);
-      const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
-      res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}.zip`);
-      res.send(zipBuffer);
-    } else {
-      const fileName = path.basename(fullPath);
-      const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
-
-      // Get file mime type
-      const mimeType = await utils.getFileType(fullPath);
-
-      // Check if this is a PSD file that needs processing
-      if (mimeType === 'image/vnd.adobe.photoshop' && config.processPsd) {
-        // Process PSD file
-        const processedFilePath = await processPsdFile(fullPath);
-
-        if (processedFilePath) {
-          // If processing was successful, serve the processed file
-          const processedMimeType = config.psdFormat === 'png' ? 'image/png' : 'image/jpeg';
-          res.setHeader('Content-Type', processedMimeType);
-          res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}.${config.psdFormat}`);
-          return fs.createReadStream(processedFilePath).pipe(res);
-        }
-        // If processing failed, fall back to original behavior
-      }
-
-      // Normal file handling
-      res.setHeader('Content-Type', mimeType);
-      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}`);
-      res.sendFile(fullPath);
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.use('/api', contentRoutes);
-
-
-app.get('/api/comic', async (req, res) => {
-  try {
-    const filePath = req.query.path;
-    if (!filePath) {
-      return res.status(400).json({ error: 'No file path provided' });
-    }
-
-    const basePath = path.resolve(config.baseDirectory);
-    const fullPath = path.join(basePath, filePath);
-    if (!fs.existsSync(fullPath)) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    const extension = path.extname(fullPath).toLowerCase();
-    const pages = [];
-
-    // Get normalized temp directory prefix (for Windows path consistency)
-    let tempDirBase = os.tmpdir();
-    // On Windows, make sure we consistently use forward slashes
-    if (process.platform === 'win32') {
-      tempDirBase = tempDirBase.replace(/\\/g, '/');
-    }
-
-    // Create extraction directory name
-    const extractionId = Date.now();
-    const tempDirName = `comic-extract-${extractionId}`;
-
-    if (extension === '.cbz') {
-      // Handle CBZ files (ZIP format)
-      try {
-        const zip = new AdmZip(fullPath);
-        const entries = zip.getEntries();
-
-        // Filter image files
-        const imageEntries = entries.filter(entry => {
-          const ext = path.extname(entry.entryName).toLowerCase();
-          return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
-        });
-
-        // Sort by filename
-        imageEntries.sort((a, b) => {
-          // Extract numbers from filenames for natural sorting
-          const aMatch = a.entryName.match(/(\d+)/g);
-          const bMatch = b.entryName.match(/(\d+)/g);
-
-          if (aMatch && bMatch) {
-            const aNum = parseInt(aMatch[aMatch.length - 1]);
-            const bNum = parseInt(bMatch[bMatch.length - 1]);
-            return aNum - bNum;
-          }
-
-          return a.entryName.localeCompare(b.entryName);
-        });
-
-        // Create a temporary directory for extracted images
-        const tempDir = path.join(tempDirBase, tempDirName);
-        fs.mkdirSync(tempDir, { recursive: true });
-
-        // Extract and create URLs for each image
-        for (let i = 0; i < imageEntries.length; i++) {
-          const entry = imageEntries[i];
-          const entryPath = path.join(tempDir, entry.entryName);
-
-          // Create directory structure if needed
-          const entryDir = path.dirname(entryPath);
-          fs.mkdirSync(entryDir, { recursive: true });
-
-          // Extract the file
-          zip.extractEntryTo(entry, entryDir, false, true);
-
-          // Check if file exists after extraction
-          if (!fs.existsSync(entryPath)) {
-            continue;
-          }
-
-          // Create a direct raw URL for the image
-          pages.push(`/api/raw?path=${encodeURIComponent(entryPath)}`);
-        }
-      } catch (error) {
-        return res.status(500).json({ error: 'Failed to extract CBZ file' });
-      }
-    } else if (extension === '.cbr') {
-      // Handle CBR files (RAR format)
-      try {
-        // Read RAR file
-        const rarData = fs.readFileSync(fullPath);
-
-        // Create extractor with buffer data
-        const extractor = await unrar.createExtractorFromData({
-          data: rarData.buffer,
-          password: undefined // Add password here if needed
-        });
-
-        // Get file list
-        const list = extractor.getFileList();
-        if (!list || !list.fileHeaders) {
-          throw new Error('Failed to read CBR file list');
-        }
-
-        // Convert iterable to array for processing
-        const fileHeadersArray = [...list.fileHeaders];
-
-        // Filter image files
-        const imageEntries = fileHeadersArray.filter(header => {
-          const ext = path.extname(header.name).toLowerCase();
-          return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
-        });
-
-        // Sort by filename
-        imageEntries.sort((a, b) => {
-          // Extract numbers from filenames for natural sorting
-          const aMatch = a.name.match(/(\d+)/g);
-          const bMatch = b.name.match(/(\d+)/g);
-
-          if (aMatch && bMatch) {
-            const aNum = parseInt(aMatch[aMatch.length - 1]);
-            const bNum = parseInt(bMatch[bMatch.length - 1]);
-            return aNum - bNum;
-          }
-
-          return a.name.localeCompare(b.name);
-        });
-
-        // Create a temporary directory for extracted images
-        const tempDir = path.join(tempDirBase, tempDirName);
-        fs.mkdirSync(tempDir, { recursive: true });
-
-        // Extract the files - we need to extract all files, and then filter
-        const extracted = extractor.extract();
-        const files = [...extracted.files];
-
-        // Process each file
-        for (const file of files) {
-          // Skip if not an image file
-          const ext = path.extname(file.fileHeader.name).toLowerCase();
-          if (!['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
-            continue;
-          }
-
-          // Get content
-          if (!file.extraction) {
-            continue;
-          }
-
-          // Save to temp file
-          const entryPath = path.join(tempDir, file.fileHeader.name);
-
-          // Create directory structure if needed
-          const entryDir = path.dirname(entryPath);
-          fs.mkdirSync(entryDir, { recursive: true });
-
-          // Write the file
-          fs.writeFileSync(entryPath, file.extraction);
-
-          // Create a direct raw URL for the image
-          pages.push(`/api/raw?path=${encodeURIComponent(entryPath)}`);
-        }
-      } catch (error) {
-        return res.status(500).json({ error: 'Failed to extract CBR file' });
-      }
-    } else {
-      return res.status(400).json({ error: 'Unsupported file format' });
-    }
-
-    return res.json({ pages });
-  } catch (error) {
-    return res.status(500).json({ error: 'Server error' });
-  }
-});
+app.use('/api', downloadRoutes);
+app.use('/api', uploadRoutes);
 
 app.post('/api/upload', writePermissionMiddleware, (req, res) => {
   const { dir = '' } = req.query;
@@ -2654,86 +2408,6 @@ async function processFolderCover(fileDetail, filePath, baseDir) {
     }
   } catch (error) {
     console.error(`Error processing cover for ${filePath}:`, error);
-  }
-}
-
-async function processPsdFile(psdPath) {
-  if (!config.processPsd) {
-    return null;
-  }
-
-  try {
-    // Generate a hash of the file path and last modified time to create a unique cache key
-    const stats = fs.statSync(psdPath);
-    const hashInput = `${psdPath}-${stats.mtimeMs}`;
-    const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
-
-    const outputPath = path.join(config.psdCacheDir, `${cacheKey}.png`);
-
-    if (fs.existsSync(outputPath)) {
-      return outputPath;
-    }
-
-    if (config.psdProcessor === 'imagemagick') {
-      return await processWithImageMagick(psdPath, outputPath);
-    } else {
-      return await processWithPsdLibrary(psdPath, outputPath);
-    }
-  } catch (error) {
-    console.error(`Error processing PSD file ${psdPath}: ${error.message}`);
-    return null;
-  }
-}
-
-// Process PSD file using ImageMagick
-async function processWithImageMagick(psdPath, outputPath) {
-  try {
-    // Process the PSD file using ImageMagick (convert command) to PNG
-    // Note: This requires ImageMagick to be installed on the system
-    const outputDir = path.dirname(outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
-    const pngOutputPath = outputPath.replace(/\.[^.]+$/, '.png');
-    // execSync(`magick "${psdPath}" "${pngOutputPath}"`);
-    execSync(`magick "${psdPath}"[0] "${pngOutputPath}"`);
-
-    if (fs.existsSync(pngOutputPath)) {
-      return pngOutputPath;
-    } else {
-      console.error(`Failed to process PSD file with ImageMagick: ${psdPath} - Output file not created`);
-      return null;
-    }
-  } catch (error) {
-    console.error(`Error executing ImageMagick for PSD processing: ${error.message}`);
-    return null;
-  }
-}
-
-// Process PSD file using the psd library
-async function processWithPsdLibrary(psdPath, outputPath) {
-  try {
-    const outputDir = path.dirname(outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
-    const pngOutputPath = outputPath.replace(/\.[^.]+$/, '.png');
-
-    await PSD.open(psdPath).then(psd => {
-      return psd.image.saveAsPng(pngOutputPath);
-    });
-
-    if (fs.existsSync(pngOutputPath)) {
-      return pngOutputPath;
-    } else {
-      console.error(`Failed to process PSD file with psd library: ${psdPath} - Output file not created`);
-      return null;
-    }
-  } catch (error) {
-    console.error(`Error processing PSD with psd library: ${error.message}`);
-    return null;
   }
 }
 

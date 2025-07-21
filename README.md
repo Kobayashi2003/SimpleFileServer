@@ -261,44 +261,22 @@ USE_MIME_MAGIC=true
 
 ## TODO
 
-- [ ] **TODO**:实现Image Preivew中的焦点缩放
-- [x] **TODO**:禁用Image Preivew的缩放倍数小于1
-- [x] **TODO**:preview窗口关闭时，让页面的定位到preview窗口关闭前展示的文件的位置
-- [ ] **TODO**:实现文件的拖拽功能，用于拖动移动文件
-- [ ] **TODO**:~~页面全局的快捷手势，例如快捷后退前进~~
-- [x] **TODO**:后端实现回收站机制
-- [x] **TODO**:视频点击关闭工具栏
-- [x] **TODO**:Image View下，让epub文件显示封面
-- [x] **TODO**:允许backend中files的api不通过index直接返回文件夹内容
-- [x] **TODO**:让search的api支持ImageOnlyMode
-- [x] **TODO**:实现Audio Preivew组件
-- [x] **TODO**:实现PDF Preivew组件
-- [x] **TODO**:实现Epub Preivew组件
-- [x] **TODO**:让epubReader接管处理close、download、fullscreen与keyboard event
+- [ ] **TODO**:~~实现Image Preivew中的焦点缩放~~
 - [ ] **TODO**:~~让page中的双击功能只在合适的区域中点击才有效~~
-- [ ] **TODO**:在PreviewBase中，添加对移动端浏览器下拉刷新的禁用功能
+- [ ] **TODO**:~~在PreviewBase中，添加对移动端浏览器下拉刷新的禁用功能~~
+- [ ] **TODO**:~~实现对多根目录的支持~~
+- [ ] **TODO**:实现文件的拖拽功能，用于拖动移动文件
+
+- [ ] **TODO**:实现VideoOnly与AudioOnly模式
+
 - [ ] **TODO**:实现对OFFICE文档的预览
 - [ ] **TODO**:实现对URL的预览
-- [ ] **TODO**:实现对多根目录的支持
-- [ ] **TODO**:实现VideoOnly与AudioOnly模式
-- [ ] **TODO**:为C# indexer添加monitor的可关闭功能
+- [ ] **TODO**:实现对压缩包文件的预览
+
+- [ ] **TODO**:为C# indexer添加monitor的可关闭选项
 - [ ] **TODO**:增加索引的方案，改为不含完整路径，只包含父子关系的结构
-- [ ] **TODO**:将comic的逻辑从raw api中独立出来，变为一个新的api
 
 ## BUG
 
-- [x] **BUG**:upload大文件时报错
-- [x] **BUG**:处理Image Preivew中，使用拖拽时，图片拖动范围仍可能会超出窗口范围
 - [ ] **BUG**:image view模式下，浏览器默认的图片拖动事件将会错误地触发文件拖拽上传功能
-- [x] **BUG**: 在selection状态时允许navigate可能会导致预想不到的错误，应该禁止在selection状态时navigate，或者在navigate时自动取消selection状态
-- [x] **BUG**: NavigatePreview时存在更新卡顿的情况
-- [x] **BUG**:preview关闭后的第一次浏览器回退无法触发
-- [x] **BUG**:用户在登录后，在使用下载时会触发浏览器登录窗口，要求再次登录
 - [ ] **BUG**:在PDF preview中，若焦点被iframe获取，则无法响应键盘事件
-- [x] **BUG**:页面在切换路径时，存在页面闪烁问题
-- [x] **BUG**:imageOnlyMode在切换时，存在页面闪烁问题
-- [x] **BUG**:搜索框的右键点击事件会因被directionMenu拦截而失效
-- [ ] **BUG**:~~非递归搜索时，搜索结果不包括文件夹~~
-- [x] **BUG**:~~C# indexer的monitor在监测时，若文件夹内的文件有create、delete或者rename（不包括change）事件，会触发其直接父目录的change事件，然而现在的indexer在监测到父目录的change事件后，会对父目录进行递归的rebuild，即便变更的只有父目录。这可能会导致大量无关文件的rebuild，浪费大量的性能，因为此时实际上有的只有一个文件的事件和一个它的父文件夹的change事件。而我之所以需要进行递归处理，是因为在父目录有create delete rename事件时，indexer并不会触发其子项的change事件，但是对与索引的建立来说子项是需要更新的。~~
-- [x] **BUG**:关闭preview窗口时，会连带关闭imageOnly模式
-- [x] **BUG**:在进行search时，backend可能会启动多个csharpIndexer实例。bug源自csharp-indexer中的超时重启逻辑。

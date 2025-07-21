@@ -7,9 +7,53 @@ const path = require('path');
 const express = require('express');
 const router = express.Router();
 
-router.get('/_raw', (req, res) => {
 
-});
+router.get('/raw', handleError(async (req, res) => {
+  const { path: requestedPath } = req.query;
+
+  if (!utils.isValidPath(requestedPath)) {
+    return res.status(400).json({ error: 'Invalid path provided' });
+  }
+
+  const fullPath = path.resolve(config.baseDirectory, requestedPath);
+  const stats = fs.statSync(fullPath);
+
+  if (stats.isDirectory()) {
+    const AdmZip = require('adm-zip');
+
+    const zip = new AdmZip();
+    zip.addLocalFolder(fullPath);
+    const zipBuffer = zip.toBuffer();
+    const fileName = path.basename(fullPath);
+    const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}.zip`);
+    res.send(zipBuffer);
+  } else if (stats.isFile()) {
+    const fileName = path.basename(fullPath);
+    const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
+    const mimeType = await utils.getFileType(fullPath);
+
+    // Check if this is a PSD file that needs processing
+    if (mimeType === 'image/vnd.adobe.photoshop' && config.processPsd) {
+      const processedFilePath = await processPsdFile(fullPath);
+
+      if (processedFilePath) {
+        // If processing was successful, serve the processed file
+        const processedMimeType = config.psdFormat === 'png' ? 'image/png' : 'image/jpeg';
+        res.setHeader('Content-Type', processedMimeType);
+        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}.${config.psdFormat}`);
+        return fs.createReadStream(processedFilePath).pipe(res);
+      }
+      // If processing failed, fall back to original behavior
+    }
+
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}`);
+    res.sendFile(fullPath);
+  }
+}));
 
 router.get('/content', handleError(async (req, res) => {
   const { path: requestedPath, _encoding } = req.query;
@@ -46,12 +90,7 @@ router.get('/thumbnail', handleError(async (req, res) => {
   }
 
   const fullPath = path.resolve(config.baseDirectory, requestedPath);
-
   const stats = fs.statSync(fullPath);
-  if (stats.isDirectory()) {
-    return res.status(400).json({ error: 'Path is not a file' })
-  }
-
   const mimeType = await utils.getFileType(fullPath);
 
   if (!config.generateThumbnail) {
@@ -399,14 +438,134 @@ router.get('/thumbnail', handleError(async (req, res) => {
   res.status(415).json({ error: 'Unsupported Media Type' });
 }));
 
-// router.get('/comic', (req, res) => {
+router.get('/comic', handleError(async (req, res) => {
+  const { path: requestedPath } = req.query;
 
-// });
+  if (!utils.isValidPath(requestedPath, isFile = true)) {
+    return res.status(400).json({ error: 'Invalid path provided' });
+  }
 
-router.get('/archive', (req, res) => {
+  const fullPath = path.resolve(config.baseDirectory, requestedPath);
+  const stats = fs.statSync(fullPath);
+  const extension = path.extname(fullPath).toLowerCase();
+
+
+  const tempDirBase = config.tempDirectory;
+
+  const crypto = require('crypto');
+
+  const hashInput = `${fullPath}-${stats.mtimeMs}`;
+  const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
+  const cacheDir = path.join(tempDirBase, 'comic', `${cacheKey}`);
+
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+
+  const pages = [];
+
+  if (extension === '.cbz') {
+    // Handle CBZ files (ZIP format)
+    const AdmZip = require('adm-zip');
+
+    const zip = new AdmZip(fullPath);
+    const entries = zip.getEntries();
+
+    const imageEntries = entries.filter(entry => {
+      const ext = path.extname(entry.entryName).toLowerCase();
+      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)
+        && pages.push(entry.entryName);
+    });
+
+    // Extract and create URLs for each image
+    for (let i = 0; i < imageEntries.length; i++) {
+      const entry = imageEntries[i];
+      const entryPath = path.join(cacheDir, entry.entryName);
+
+      zip.extractEntryTo(entry, cacheDir, false, true);
+
+      if (!fs.existsSync(entryPath)) {
+        continue;
+      }
+    }
+  }
+
+  if (extension === '.cbr') {
+    // Handle CBR files (RAR format)
+    const unrar = require('node-unrar-js');
+
+    const rarData = fs.readFileSync(fullPath);
+
+    const extractor = await unrar.createExtractorFromData({
+      data: rarData.buffer,
+      password: undefined // Add password here if needed
+    });
+
+    const extracted = extractor.extract();
+    const extractedFiles = [...extracted.files];
+
+    for (const file of extractedFiles) {
+      const ext = path.extname(file.fileHeader.name).toLowerCase();
+      if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext) && file.extraction) {
+
+        pages.push(entryPath);
+
+        const entryPath = path.join(cacheDir, file.fileHeader.name);
+        fs.writeFileSync(entryPath, file.extraction);
+      }
+    }
+  }
+
+  if (pages.length > 0) {
+    pages.sort((a, b) => {
+      // Extract numbers from filenames for natural sorting
+      const aMatch = a.match(/(\d+)/g);
+      const bMatch = b.match(/(\d+)/g);
+
+      if (aMatch && bMatch) {
+        const aNum = parseInt(aMatch[aMatch.length - 1]);
+        const bNum = parseInt(bMatch[bMatch.length - 1]);
+        return aNum - bNum;
+      }
+
+      return a.localeCompare(b);
+    });
+
+    pages.forEach((page, index) => {
+      pages[index] = `/api/comic-page/${cacheKey}/${encodeURIComponent(page)}`;
+    });
+
+    return res.json({ pages });
+  }
+
+  return res.status(415).json({ error: 'Unsupported media type' });
+}));
+
+router.get('/comic-page/:cacheKey/:page', handleError((req, res) => {
+  const { cacheKey, page } = req.params;
+  const cacheDir = path.join(config.tempDirectory, 'comic', cacheKey);
+  const entryPath = path.join(cacheDir, decodeURIComponent(page));
+
+  const contentType = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp'
+  }[path.extname(entryPath).toLowerCase()];
+
+  if (fs.existsSync(entryPath)) {
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return fs.createReadStream(entryPath).pipe(res);
+  }
+
+  return res.status(404).json({ error: 'Page not found' });
+}));
+
+router.get('/archive', handleError((req, res) => {
   // TODO: Implement archive endpoint
-});
-
+}));
 
 
 async function processPsdFile(psdPath) {
