@@ -12,15 +12,18 @@ function normalizePath(filePath) {
   return filePath.replace(/\\/g, '/');
 }
 
-function isValidPath(filePath, isFile=false, isDirectory=false) {
-  if (typeof filePath !== 'string') {
+function checkPath(path, isFile=false, isDirectory=false) {
+  if (typeof path !== 'string') {
     return false;
   }
-  if (filePath.trim() === '') {
+  if (path.trim() === '') { // root directory
+    if (!isFile) {
+      return true;
+    }
     return false;
   }
 
-  const fullPath = path.resolve(config.baseDirectory, filePath);
+  const fullPath = path.resolve(config.baseDirectory, path);
 
   if (!fullPath.startsWith(path.resolve(config.baseDirectory))) {
     return false;
@@ -35,6 +38,18 @@ function isValidPath(filePath, isFile=false, isDirectory=false) {
     return false;
   }
   return true;
+}
+
+function isValidPath(path) {
+  return checkPath(path, false, false);
+}
+
+function isValidFilePath(path) {
+  return checkPath(path, true, false);
+}
+
+function isValidDirectoryPath(path) {
+  return checkPath(path, false, true)
 }
 
 function getFileTypeByMime(filePath) {
@@ -155,6 +170,8 @@ module.exports = {
   isRecoverableError,
   normalizePath,
   isValidPath,
+  isValidFilePath,
+  isValidDirectoryPath,
   getFileType,
   getFileTypeByMime,
   getFileTypeByExt,

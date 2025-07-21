@@ -114,7 +114,7 @@ const config = {
   // **************************************************
   // Enable file indexing for faster search and browsing
   useFileIndex: process.env.USE_FILE_INDEX === 'true' || false,
-  // Whether to update index during write operations (upload, delete, rename, move, clone, mkdir)
+  // Whether to update index during write operations (upload, delete, rename, move, clone, mkdir, etc.)
   updateIndexOnWrite: process.env.UPDATE_INDEX_ON_WRITE === 'true' || false,
   // Rebuild file index on server startup
   rebuildIndexOnStartup: process.env.REBUILD_INDEX_ON_STARTUP === 'true' || false,

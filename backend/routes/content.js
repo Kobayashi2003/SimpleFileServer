@@ -60,7 +60,7 @@ router.get('/content', handleError(async (req, res) => {
 
   const encoding = _encoding || 'utf8';
 
-  if (!utils.isValidPath(requestedPath, isFile = true)) {
+  if (!utils.isValidFilePath(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -85,7 +85,7 @@ router.get('/thumbnail', handleError(async (req, res) => {
 
   const failMsg = 'Failed to generate thumbnail';
 
-  if (!utils.isValidPath(requestedPath, isFile = true)) {
+  if (!utils.isValidFilePath(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -441,7 +441,7 @@ router.get('/thumbnail', handleError(async (req, res) => {
 router.get('/comic', handleError(async (req, res) => {
   const { path: requestedPath } = req.query;
 
-  if (!utils.isValidPath(requestedPath, isFile = true)) {
+  if (!utils.isValidFilePath(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
