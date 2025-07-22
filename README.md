@@ -280,7 +280,9 @@ USE_MIME_MAGIC=true
 - [ ] **TODO**:改善后端的api阻塞问题
   - [x] api/bg
   - [x] api/content
-  - [x] api/comic-page  
+  - [x] api/comic-page
+  - [x] api/download
+  - [x] api/raw（但是psd部分的处理仍需改进）
 
 ## BUG
 

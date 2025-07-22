@@ -13,14 +13,12 @@ router.get('/bg', handleError(async (req, res) => {
   const stats = await fs.promises.stat(bgImagePath);
 
   if (!stats.isFile()) {
-    console.error(`Background image path is not a file: ${bgImagePath}`);
     return res.status(400).send('Path is not a file');
   }
 
   const contentType = await utils.getFileType(bgImagePath);
 
   if (!contentType.startsWith('image/')) {
-    console.error(`Unsupported media type: ${contentType}`);
     return res.status(415).send('Unsupported media type');
   }
 
@@ -28,12 +26,11 @@ router.get('/bg', handleError(async (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
   res.setHeader('Content-Length', stats.size);
 
-  const stream = fs.createReadStream(bgImagePath, {
+  const readStream = fs.createReadStream(bgImagePath, {
     highWaterMark: config.highWaterMark
   });
 
-  stream.on('error', (err) => {
-    console.error('Background image read error:', err);
+  readStream.on('error', (error) => {
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to read background image' });
     } else {
@@ -41,15 +38,10 @@ router.get('/bg', handleError(async (req, res) => {
     }
   });
 
-  req.on('close', () => {
-    stream.destroy();
-  });
+  req.on('close', () => readStream.destroy());
+  req.on('aborted', () => readStream.destroy());
 
-  req.on('aborted', () => {
-    stream.destroy();
-  });
-
-  stream.pipe(res);
+  readStream.pipe(res);
 }));
 
 router.get('/bgs', handleError(async (req, res) => {

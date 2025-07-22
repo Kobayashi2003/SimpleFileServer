@@ -4,6 +4,8 @@ const { handleError } = require('../wapper/errorHandler');
 
 const fs = require('fs');
 const path = require('path');
+const { Worker } = require('worker_threads');
+
 const express = require('express');
 const router = express.Router();
 
@@ -11,29 +13,65 @@ const router = express.Router();
 router.get('/raw', handleError(async (req, res) => {
   const { path: requestedPath } = req.query;
 
-  if (!utils.isValidPathSync(requestedPath)) {
+  if (!(await utils.isValidPath(requestedPath))) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
-  const fullPath = path.resolve(config.baseDirectory, requestedPath);
-  const stats = fs.statSync(fullPath);
+  let fullPath = path.resolve(config.baseDirectory, requestedPath);
+  let stats = await fs.promises.stat(fullPath);
 
   if (stats.isDirectory()) {
-    const AdmZip = require('adm-zip');
-
-    const zip = new AdmZip();
-    zip.addLocalFolder(fullPath);
-    const zipBuffer = zip.toBuffer();
     const fileName = path.basename(fullPath);
     const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}.zip`);
-    res.send(zipBuffer);
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const worker = new Worker(path.join(__dirname, '../workers/zipWorker.js'), {
+      workerData: {
+        pathList: [requestedPath],
+        baseDirectory: config.baseDirectory
+      }
+    });
+
+    worker.on('message', (message) => {
+      switch (message.type) {
+        case 'data':
+          res.write(message.chunk);
+          break;
+
+        case 'end':
+          res.end();
+          break;
+
+        case 'error':
+          // res.status(500).json({ error: message.error });
+          res.status(500).json({ error: 'Failed to download files' });
+          break;
+      }
+    });
+
+    worker.on('error', (error) => {
+      // res.status(500).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to download files' });
+    });
+
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        // res.status(500).json({ error: `Worker stopped with exit code ${code}` });
+        res.status(500).json({ error: 'Failed to download files' });
+      }
+    });
+
+    req.on('close', () => worker.terminate());
+    req.on('aborted', () => worker.terminate());
+
   } else if (stats.isFile()) {
     const fileName = path.basename(fullPath);
     const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
-    const mimeType = await utils.getFileType(fullPath);
+    let mimeType = await utils.getFileType(fullPath);
+    let extension = path.extname(fullPath).toLowerCase();
 
     // Check if this is a PSD file that needs processing
     if (mimeType === 'image/vnd.adobe.photoshop' && config.processPsd) {
@@ -41,17 +79,34 @@ router.get('/raw', handleError(async (req, res) => {
 
       if (processedFilePath) {
         // If processing was successful, serve the processed file
-        const processedMimeType = config.psdFormat === 'png' ? 'image/png' : 'image/jpeg';
-        res.setHeader('Content-Type', processedMimeType);
-        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}.${config.psdFormat}`);
-        return fs.createReadStream(processedFilePath).pipe(res);
+        fullPath = processedFilePath;
+        stats = await fs.promises.stat(processedFilePath);
+        mimeType = config.psdFormat === 'png' ? 'image/png' : 'image/jpeg';
+        extension = config.psdFormat === 'png' ? '.png' : '.jpg';
       }
-      // If processing failed, fall back to original behavior
     }
 
     res.setHeader('Content-Type', mimeType);
-    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}`);
-    res.sendFile(fullPath);
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}${extension}`);
+    res.setHeader('Content-Length', stats.size);
+
+    const readStream = fs.createReadStream(fullPath, {
+      highWaterMark: config.highWaterMark
+    });
+
+    readStream.on('error', (err) => {
+      console.error('File read error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to read file' });
+      } else {
+        res.destroy();
+      }
+    });
+
+    req.on('close', () => readStream.destroy());
+    req.on('aborted', () => readStream.destroy());
+
+    readStream.pipe(res);
   }
 }));
 
@@ -93,15 +148,8 @@ router.get('/content', handleError(async (req, res) => {
     }
   });
 
-  req.on('close', () => {
-    console.log('Request closed');
-    readStream.destroy();
-  });
-
-  req.on('aborted', () => {
-    console.log('Request aborted');
-    readStream.destroy();
-  });
+  req.on('close', () => readStream.destroy());
+  req.on('aborted', () => readStream.destroy());
 
   readStream.pipe(res);
 }));
@@ -584,33 +632,36 @@ router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const contentType = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp'
-  }[path.extname(entryPath).toLowerCase()];
+  let stats;
 
-  if (!contentType) {
+  try {
+    stats = await fs.promises.stat(entryPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+    throw error;
+  }
+
+  if (!stats.isFile()) {
     return res.status(415).json({ error: 'Unsupported media type' });
   }
 
-  const stats = await fs.promises.stat(entryPath);
+  const contentType = await utils.getFileType(entryPath);
 
-  if (!stats.isFile()) {
-    return res.status(404).json({ error: 'Page not found' });
+  if (!contentType.startsWith('image/')) {
+    return res.status(415).json({ error: 'Unsupported media type' });
   }
 
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.setHeader('Content-Length', stats.size);
 
-  const stream = fs.createReadStream(entryPath, {
+  const readStream = fs.createReadStream(entryPath, {
     highWaterMark: config.highWaterMark
   });
 
-  stream.on('error', (err) => {
+  readStream.on('error', (err) => {
     console.error('Comic page read error:', err);
     if (!res.headersSent) {
       res.status(500).json({ error: 'Failed to read comic page' });
@@ -619,13 +670,8 @@ router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
     }
   });
 
-  req.on('close', () => {
-    stream.destroy();
-  });
-
-  req.on('aborted', () => {
-    stream.destroy();
-  });
+  req.on('close', () => readStream.destroy());
+  req.on('aborted', () => readStream.destroy());
 
   stream.pipe(res);
 }));

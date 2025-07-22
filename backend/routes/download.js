@@ -1,9 +1,9 @@
 const config = require('../config');
 const utils = require('../utils');
 
-const fs = require('fs');
 const path = require('path')
-const AdmZip = require('adm-zip');
+const { Worker } = require('worker_threads');
+
 const express = require('express');
 const router = express.Router();
 
@@ -11,23 +11,23 @@ router.post('/download', async (req, res) => {
   const { path: requestedPath, paths: requestedPaths } = req.body;
 
   if (!requestedPath && !requestedPaths) {
-    return res.status(400).json({ error: 'No path or paths provided' });
+    return res.status(400).json({ error: 'No path provided' });
   }
 
   if (requestedPath && !(await utils.isValidPath(requestedPath))) {
     return res.status(400).json({ error: 'Invalid path provided' });
-  } 
+  }
 
   if (requestedPaths) {
     if (!Array.isArray(requestedPaths)) {
-      return res.status(400).json({ error: 'Requested paths must be an array' });
+      return res.status(400).json({ error: 'Paths must be an array' });
     }
     for (const p of requestedPaths) {
       if (!(await utils.isValidPath(p))) {
         return res.status(400).json({ error: 'Invalid path provided' });
       }
     }
- }
+  }
 
   let pathList = [];
   if (requestedPath) {
@@ -36,31 +36,47 @@ router.post('/download', async (req, res) => {
     pathList = requestedPaths.map(p => p.trim());
   }
 
-  try {
-    const zip = new AdmZip();
+  const fileName = new Date().toISOString().replace(/[-:Z]/g, '');
+  const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
 
-    for (const p of pathList) {
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}.zip`);
 
-      const fullPath = path.resolve(config.baseDirectory, p);
+  const worker = new Worker(path.join(__dirname, '../workers/zipWorker.js'), {
+    workerData: { pathList, baseDirectory: config.baseDirectory }
+  });
 
-      const stats = fs.statSync(fullPath);
+  worker.on('message', (message) => {
+    switch (message.type) {
+      case 'data':
+        res.write(message.chunk);
+        break;
 
-      if (stats.isDirectory()) {
-        zip.addLocalFolder(fullPath);
-      } else if (stats.isFile()) {
-        zip.addLocalFile(fullPath);
-      }
+      case 'end':
+        res.end();
+        break;
+
+      case 'error':
+        // res.status(500).json({ error: message.error });
+        res.status(500).json({ error: 'Failed to download files' });
+        break;
     }
+  });
 
-    const zipBuffer = zip.toBuffer();
-    const fileName = new Date().toISOString().replace(/[-:Z]/g, '');
-    const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodedFileName}.zip`);
-    res.send(zipBuffer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+  worker.on('error', (error) => {
+    // res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to download files' });
+  });
+
+  worker.on('exit', (code) => {
+    if (code !== 0) {
+      // res.status(500).json({ error: `Worker stopped with exit code ${code}` });
+      res.status(500).json({ error: 'Failed to download files' });
+    }
+  });
+
+  req.on('close', () => worker.terminate());
+  req.on('aborted', () => worker.terminate());
 });
 
 module.exports = router;
