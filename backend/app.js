@@ -31,6 +31,7 @@ const contentRoutes = require('./routes/content')
 const downloadRoutes = require('./routes/download');
 const uploadRoutes = require('./routes/upload');
 const systemRoutes = require('./routes/system');
+const testRoutes = require('./routes/test');
 
 
 const app = express();
@@ -52,6 +53,8 @@ app.get('/api/version', (req, res) => {
 
 app.use('/api', backgroundRoutes);
 app.use('/api', authRoutes);
+
+// app.use('/api', testRoutes);
 
 app.use(authMiddleware);
 

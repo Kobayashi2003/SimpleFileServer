@@ -76,7 +76,33 @@ router.get('/content', handleError(async (req, res) => {
     return res.status(415).json({ error: 'Unsupported media type' });
   }
 
-  const readStream = fs.createReadStream(fullPath, { encoding });
+  res.setHeader('Content-Type', `${contentType}; charset=${encoding}`);
+  res.setHeader('Content-Length', stats.size);
+
+  const readStream = fs.createReadStream(fullPath, {
+    encoding,
+    highWaterMark: config.highWaterMark
+  });
+
+  readStream.on('error', (err) => {
+    console.error('File read error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to read file' });
+    } else {
+      res.destroy();
+    }
+  });
+
+  req.on('close', () => {
+    console.log('Request closed');
+    readStream.destroy();
+  });
+
+  req.on('aborted', () => {
+    console.log('Request aborted');
+    readStream.destroy();
+  });
+
   readStream.pipe(res);
 }));
 
@@ -548,6 +574,10 @@ router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
     return res.status(400).json({ error: 'Invalid request parameters' });
   }
 
+  if (!/^[a-f0-9]{32}$/.test(cacheKey)) {
+    return res.status(400).json({ error: 'Invalid cache key format' });
+  }
+
   const entryPath = path.resolve(config.tempDirectory, 'comic', cacheKey, decodeURIComponent(page));
 
   if (!entryPath.startsWith(path.resolve(config.tempDirectory, 'comic'))) {
@@ -576,7 +606,27 @@ router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.setHeader('Content-Length', stats.size);
 
-  const stream = fs.createReadStream(entryPath);
+  const stream = fs.createReadStream(entryPath, {
+    highWaterMark: config.highWaterMark
+  });
+
+  stream.on('error', (err) => {
+    console.error('Comic page read error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to read comic page' });
+    } else {
+      res.destroy();
+    }
+  });
+
+  req.on('close', () => {
+    stream.destroy();
+  });
+
+  req.on('aborted', () => {
+    stream.destroy();
+  });
+
   stream.pipe(res);
 }));
 

@@ -30,9 +30,16 @@ const config = {
   uploadCountLimit: process.env.UPLOAD_COUNT_LIMIT || 10,
   // Maximum size limit for file uploads (default: 100GB)
   uploadSizeLimit: process.env.UPLOAD_SIZE_LIMIT || 1024 * 1024 * 1024 * 100, // 100GB
+
   // Maximum file size for content display (default: 5GB)
   contentMaxSize: process.env.CONTENT_MAX_SIZE || 5 * 1024 * 1024 * 1024, // 5GB
+  // High water mark for stream reading (default: 64KB)
+  highWaterMark: process.env.HIGH_WATER_MARK || 64 * 1024, // 64KB
 
+  // *** download options
+  // **************************************************
+  // Maximum size limit for file downloads (default: 100GB)
+  // downloadSizeLimit: process.env.DOWNLOAD_SIZE_LIMIT || 1024 * 1024 * 1024 * 100, // 100GB
 
 
   // *** Logging options

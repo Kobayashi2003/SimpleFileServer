@@ -7,14 +7,14 @@ const AdmZip = require('adm-zip');
 const express = require('express');
 const router = express.Router();
 
-router.post('/download', (req, res) => {
+router.post('/download', async (req, res) => {
   const { path: requestedPath, paths: requestedPaths } = req.body;
 
   if (!requestedPath && !requestedPaths) {
     return res.status(400).json({ error: 'No path or paths provided' });
   }
 
-  if (requestedPath && !utils.isValidPathSync(requestedPath)) {
+  if (requestedPath && !(await utils.isValidPath(requestedPath))) {
     return res.status(400).json({ error: 'Invalid path provided' });
   } 
 
@@ -23,7 +23,7 @@ router.post('/download', (req, res) => {
       return res.status(400).json({ error: 'Requested paths must be an array' });
     }
     for (const p of requestedPaths) {
-      if (!utils.isValidPathSync(p)) {
+      if (!(await utils.isValidPath(p))) {
         return res.status(400).json({ error: 'Invalid path provided' });
       }
     }

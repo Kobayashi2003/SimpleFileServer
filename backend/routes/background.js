@@ -20,15 +20,35 @@ router.get('/bg', handleError(async (req, res) => {
   const contentType = await utils.getFileType(bgImagePath);
 
   if (!contentType.startsWith('image/')) {
-    console.error(`Unsupported file extension: ${ext}`);
-    return res.status(400).send('Unsupported file extension');
+    console.error(`Unsupported media type: ${contentType}`);
+    return res.status(415).send('Unsupported media type');
   }
 
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
   res.setHeader('Content-Length', stats.size);
 
-  const stream = fs.createReadStream(bgImagePath);
+  const stream = fs.createReadStream(bgImagePath, {
+    highWaterMark: config.highWaterMark
+  });
+
+  stream.on('error', (err) => {
+    console.error('Background image read error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to read background image' });
+    } else {
+      res.destroy();
+    }
+  });
+
+  req.on('close', () => {
+    stream.destroy();
+  });
+
+  req.on('aborted', () => {
+    stream.destroy();
+  });
+
   stream.pipe(res);
 }));
 
