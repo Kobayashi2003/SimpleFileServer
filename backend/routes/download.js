@@ -14,7 +14,7 @@ router.post('/download', (req, res) => {
     return res.status(400).json({ error: 'No path or paths provided' });
   }
 
-  if (requestedPath && !utils.isValidPath(requestedPath)) {
+  if (requestedPath && !utils.isValidPathSync(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   } 
 
@@ -23,7 +23,7 @@ router.post('/download', (req, res) => {
       return res.status(400).json({ error: 'Requested paths must be an array' });
     }
     for (const p of requestedPaths) {
-      if (!utils.isValidPath(p)) {
+      if (!utils.isValidPathSync(p)) {
         return res.status(400).json({ error: 'Invalid path provided' });
       }
     }

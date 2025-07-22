@@ -11,7 +11,7 @@ const router = express.Router();
 router.get('/raw', handleError(async (req, res) => {
   const { path: requestedPath } = req.query;
 
-  if (!utils.isValidPath(requestedPath)) {
+  if (!utils.isValidPathSync(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -60,12 +60,12 @@ router.get('/content', handleError(async (req, res) => {
 
   const encoding = _encoding || 'utf8';
 
-  if (!utils.isValidFilePath(requestedPath)) {
+  if (!(await utils.isValidFilePath(requestedPath))) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
   const fullPath = path.resolve(config.baseDirectory, requestedPath);
-  const stats = fs.statSync(fullPath);
+  const stats = await fs.promises.stat(fullPath);
 
   if (stats.size > config.contentMaxSize) {
     return res.status(413).json({ error: 'Content size exceeds the maximum limit' });
@@ -76,8 +76,8 @@ router.get('/content', handleError(async (req, res) => {
     return res.status(415).json({ error: 'Unsupported media type' });
   }
 
-  const content = fs.readFileSync(fullPath, encoding);
-  res.status(200).send(content);
+  const readStream = fs.createReadStream(fullPath, { encoding });
+  readStream.pipe(res);
 }));
 
 router.get('/thumbnail', handleError(async (req, res) => {
@@ -85,7 +85,7 @@ router.get('/thumbnail', handleError(async (req, res) => {
 
   const failMsg = 'Failed to generate thumbnail';
 
-  if (!utils.isValidFilePath(requestedPath)) {
+  if (!utils.isValidFilePathSync(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -441,7 +441,7 @@ router.get('/thumbnail', handleError(async (req, res) => {
 router.get('/comic', handleError(async (req, res) => {
   const { path: requestedPath } = req.query;
 
-  if (!utils.isValidFilePath(requestedPath)) {
+  if (!utils.isValidFilePathSync(requestedPath)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -541,10 +541,18 @@ router.get('/comic', handleError(async (req, res) => {
   return res.status(415).json({ error: 'Unsupported media type' });
 }));
 
-router.get('/comic-page/:cacheKey/:page', handleError((req, res) => {
+router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
   const { cacheKey, page } = req.params;
-  const cacheDir = path.join(config.tempDirectory, 'comic', cacheKey);
-  const entryPath = path.join(cacheDir, decodeURIComponent(page));
+
+  if (!cacheKey || !page) {
+    return res.status(400).json({ error: 'Invalid request parameters' });
+  }
+
+  const entryPath = path.resolve(config.tempDirectory, 'comic', cacheKey, decodeURIComponent(page));
+
+  if (!entryPath.startsWith(path.resolve(config.tempDirectory, 'comic'))) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   const contentType = {
     '.jpg': 'image/jpeg',
@@ -554,13 +562,22 @@ router.get('/comic-page/:cacheKey/:page', handleError((req, res) => {
     '.webp': 'image/webp'
   }[path.extname(entryPath).toLowerCase()];
 
-  if (fs.existsSync(entryPath)) {
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
-    return fs.createReadStream(entryPath).pipe(res);
+  if (!contentType) {
+    return res.status(415).json({ error: 'Unsupported media type' });
   }
 
-  return res.status(404).json({ error: 'Page not found' });
+  const stats = await fs.promises.stat(entryPath);
+
+  if (!stats.isFile()) {
+    return res.status(404).json({ error: 'Page not found' });
+  }
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Content-Length', stats.size);
+
+  const stream = fs.createReadStream(entryPath);
+  stream.pipe(res);
 }));
 
 router.get('/archive', handleError((req, res) => {

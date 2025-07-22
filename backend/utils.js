@@ -12,45 +12,7 @@ function normalizePath(filePath) {
   return filePath.replace(/\\/g, '/');
 }
 
-function checkPath(filePath, isFile=false, isDirectory=false) {
-  if (typeof filePath !== 'string') {
-    return false;
-  }
-  if (filePath.trim() === '') { // root directory
-    if (!isFile) {
-      return true;
-    }
-    return false;
-  }
 
-  const fullPath = path.resolve(config.baseDirectory, filePath);
-
-  if (!fullPath.startsWith(path.resolve(config.baseDirectory))) {
-    return false;
-  }
-  if (!fs.existsSync(fullPath)) {
-    return false;
-  }
-  if (isFile && !fs.statSync(fullPath).isFile()) {
-    return false;
-  }
-  if (isDirectory && !fs.statSync(fullPath).isDirectory()) {
-    return false;
-  }
-  return true;
-}
-
-function isValidPath(filePath) {
-  return checkPath(filePath, false, false);
-}
-
-function isValidFilePath(filePath) {
-  return checkPath(filePath, true, false);
-}
-
-function isValidDirectoryPath(path) {
-  return checkPath(path, false, true)
-}
 
 function getFileTypeByMime(filePath) {
   return new Promise((resolve) => {
@@ -166,15 +128,112 @@ function safeDeleteDirectory(dirPath) {
   }
 }
 
+
+async function checkPath(filePath, isFile = false, isDirectory = false) {
+  if (typeof filePath !== 'string') {
+    return false;
+  }
+
+  if (filePath.trim() === '') { // root directory
+    if (!isFile) {
+      return true;
+    }
+    return false;
+  }
+
+  const fullPath = path.resolve(config.baseDirectory, filePath);
+
+  if (!fullPath.startsWith(path.resolve(config.baseDirectory))) {
+    return false;
+  }
+
+  try {
+    const stats = await fs.promises.stat(fullPath);
+
+    if (isFile && !stats.isFile()) {
+      return false;
+    }
+    if (isDirectory && !stats.isDirectory()) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error checking path:', error);
+    return false;
+  }
+}
+
+async function isValidPath(filePath) {
+  return await checkPath(filePath, false, false);
+}
+
+async function isValidFilePath(filePath) {
+  return await checkPath(filePath, true, false);
+}
+
+async function isValidDirectoryPath(path) {
+  return await checkPath(path, false, true)
+}
+
+function checkPathSync(filePath, isFile=false, isDirectory=false) {
+  if (typeof filePath !== 'string') {
+    return false;
+  }
+  if (filePath.trim() === '') { // root directory
+    if (!isFile) {
+      return true;
+    }
+    return false;
+  }
+
+  const fullPath = path.resolve(config.baseDirectory, filePath);
+
+  if (!fullPath.startsWith(path.resolve(config.baseDirectory))) {
+    return false;
+  }
+
+  try {
+    const stats = fs.statSync(fullPath);
+
+    if (isFile && !stats.isFile()) {
+      return false;
+    }
+    if (isDirectory && !stats.isDirectory()) {
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error checking path:', error);
+    return false;
+  }
+}
+
+function isValidPathSync(filePath) {
+  return checkPathSync(filePath, false, false);
+}
+
+function isValidFilePathSync(filePath) {
+  return checkPathSync(filePath, true, false);
+}
+
+function isValidDirectoryPathSync(filePath) {
+  return checkPathSync(filePath, false, true);
+}
+
 module.exports = {
   isRecoverableError,
   normalizePath,
-  isValidPath,
-  isValidFilePath,
-  isValidDirectoryPath,
   getFileType,
   getFileTypeByMime,
   getFileTypeByExt,
   getSubdirectories,
   safeDeleteDirectory,
+  isValidPath,
+  isValidFilePath,
+  isValidDirectoryPath,
+  isValidPathSync,
+  isValidFilePathSync,
+  isValidDirectoryPathSync,
 }; 

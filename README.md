@@ -276,6 +276,12 @@ USE_MIME_MAGIC=true
 - [ ] **TODO**:为C# indexer添加monitor的可关闭选项
 - [ ] **TODO**:增加索引的方案，改为不含完整路径，只包含父子关系的结构
 
+- [ ] **TODO**:考虑将upload等api的参数传递方式从query string改为使用requst body
+- [ ] **TODO**:改善后端的api阻塞问题
+  - [x] api/bg
+  - [x] api/content
+  - [x] api/comic-page  
+
 ## BUG
 
 - [ ] **BUG**:image view模式下，浏览器默认的图片拖动事件将会错误地触发文件拖拽上传功能

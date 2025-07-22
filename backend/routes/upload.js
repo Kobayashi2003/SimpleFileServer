@@ -12,8 +12,8 @@ const router = express.Router();
 router.post('/upload', writePermissionMiddleware, handleError((req, res) => {
   const { dir = '' } = req.query;
 
-  if (!utils.isValidDirectoryPath(dir)) {
-    // return res.status(400).json({ error: 'Invalid path provided' });
+  if (!utils.isValidDirectoryPathSync(dir)) {
+    return res.status(400).json({ error: 'Invalid path provided' });
   }
 
   const uploadPath = path.join(config.baseDirectory, dir);
@@ -66,7 +66,7 @@ router.post('/upload', writePermissionMiddleware, handleError((req, res) => {
 router.post('/upload-folder', writePermissionMiddleware, handleError((req, res) => {
   const { dir = '' } = req.query;
 
-  if (!utils.isValidDirectoryPath(dir)) {
+  if (!utils.isValidDirectoryPathSync(dir)) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -84,8 +84,6 @@ router.post('/upload-folder', writePermissionMiddleware, handleError((req, res) 
         parts.pop(); // Remove the filename
         relativePath = parts.join('/');
       }
-
-      console.log({relativePath})
 
       // Create full directory path
       const fullPath = path.join(uploadPath, relativePath);

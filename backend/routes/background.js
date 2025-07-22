@@ -7,22 +7,17 @@ const path = require('path');
 const express = require('express');
 const router = express.Router();
 
-router.get('/bg', handleError((req, res) => {
+router.get('/bg', handleError(async (req, res) => {
   const bgImagePath = path.resolve(config.backgroundImagePath);
 
-  if (!fs.existsSync(bgImagePath)) {
-    console.error(`Background image not found at path: ${bgImagePath}`);
-    return res.status(404).send('Background image not found');
-  }
+  const stats = await fs.promises.stat(bgImagePath);
 
-  const stats = fs.statSync(bgImagePath);
   if (!stats.isFile()) {
     console.error(`Background image path is not a file: ${bgImagePath}`);
     return res.status(400).send('Path is not a file');
   }
 
-  const ext = path.extname(bgImagePath).toLowerCase();
-  const contentType = utils.getFileTypeByExt(ext);
+  const contentType = await utils.getFileType(bgImagePath);
 
   if (!contentType.startsWith('image/')) {
     console.error(`Unsupported file extension: ${ext}`);
@@ -31,6 +26,7 @@ router.get('/bg', handleError((req, res) => {
 
   res.setHeader('Content-Type', contentType);
   res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+  res.setHeader('Content-Length', stats.size);
 
   const stream = fs.createReadStream(bgImagePath);
   stream.pipe(res);

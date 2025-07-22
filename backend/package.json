@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
     "better-sqlite3": "^11.10.0",
     "chokidar": "^4.0.3",
     "cookie-parser": "^1.4.7",
