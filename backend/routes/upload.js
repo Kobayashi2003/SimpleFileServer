@@ -1,6 +1,6 @@
 const config = require('../config');
 const utils = require('../utils');
-const { handleError } = require('../wapper/errorHandler');
+const { handleError } = require('../wappers/errorHandler');
 const { writePermissionMiddleware } = require('../middleware/auth');
 
 const fs = require('fs');

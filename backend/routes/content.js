@@ -17,8 +17,8 @@ router.get('/raw', handleError(async (req, res) => {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
-  let fullPath = path.resolve(config.baseDirectory, requestedPath);
-  let stats = await fs.promises.stat(fullPath);
+  const fullPath = path.resolve(config.baseDirectory, requestedPath);
+  const stats = await fs.promises.stat(fullPath);
 
   if (stats.isDirectory()) {
     const fileName = path.basename(fullPath);
@@ -69,22 +69,88 @@ router.get('/raw', handleError(async (req, res) => {
     req.on('aborted', () => worker.terminate());
 
   } else if (stats.isFile()) {
+
     const fileName = path.basename(fullPath);
     const encodedFileName = encodeURIComponent(fileName).replace(/%20/g, ' ');
-    let mimeType = await utils.getFileType(fullPath);
-    let extension = path.extname(fullPath).toLowerCase();
+    const mimeType = await utils.getFileType(fullPath);
+    const extension = path.extname(fullPath).toLowerCase();
 
-    // Check if this is a PSD file that needs processing
     if (mimeType === 'image/vnd.adobe.photoshop' && config.processPsd) {
       const processedFilePath = await processPsdFile(fullPath);
 
       if (processedFilePath) {
         // If processing was successful, serve the processed file
-        fullPath = processedFilePath;
-        stats = await fs.promises.stat(processedFilePath);
-        mimeType = config.psdFormat === 'png' ? 'image/png' : 'image/jpeg';
-        extension = config.psdFormat === 'png' ? '.png' : '.jpg';
+        res.setHeader('Content-Type', config.psdFormat === 'png' ? 'image/png' : 'image/jpeg');
+        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}.${config.psdFormat}`);
+
+        const readStream = fs.createReadStream(processedFilePath, {
+          highWaterMark: config.highWaterMark
+        });
+
+        readStream.on('error', (err) => {
+          console.error('File read error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to read file' });
+          } else {
+            res.destroy();
+          }
+        });
+
+        req.on('close', () => readStream.destroy());
+        req.on('aborted', () => readStream.destroy());
+
+        readStream.pipe(res);
       }
+    }
+
+    if (mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+      // Handle Range requests for video and audio files
+      const range = req.headers.range;
+      
+      if (range) {
+        const positions = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(positions[0], 10);
+        const end = positions[1] ? parseInt(positions[1], 10) : stats.size - 1;
+        const chunksize = (end - start) + 1;
+
+        // Validate range
+        if (start >= stats.size || end >= stats.size) {
+          res.status(416).setHeader('Content-Range', `bytes */${stats.size}`);
+          return res.end();
+        }
+
+        res.status(206); // Partial Content
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${stats.size}`);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Content-Length', chunksize);
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodedFileName}${extension}`);
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+
+        const readStream = fs.createReadStream(fullPath, {
+          start,
+          end,
+          highWaterMark: config.highWaterMark
+        });
+
+        readStream.on('error', (err) => {
+          console.error('Media range read error:', err);
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to read media file' });
+          } else {
+            res.destroy();
+          }
+        });
+
+        req.on('close', () => readStream.destroy());
+        req.on('aborted', () => readStream.destroy());
+
+        return readStream.pipe(res);
+      }
+      
+      // If no range request, set Accept-Ranges header for future requests
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
     }
 
     res.setHeader('Content-Type', mimeType);
@@ -516,7 +582,7 @@ router.get('/thumbnail', handleError(async (req, res) => {
 router.get('/comic', handleError(async (req, res) => {
   const { path: requestedPath } = req.query;
 
-  if (!( await utils.isValidFilePath(requestedPath)) ) {
+  if (!(await utils.isValidFilePath(requestedPath))) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
@@ -539,17 +605,17 @@ router.get('/comic', handleError(async (req, res) => {
   }
 
   const worker = new Worker(path.join(__dirname, '../workers/comicWorker.js'), {
-    workerData: { 
-      filePath: fullPath, 
-      cacheDir: cacheDir, 
-      extension: extension 
+    workerData: {
+      filePath: fullPath,
+      cacheDir: cacheDir,
+      extension: extension
     }
   });
 
   worker.on('message', (message) => {
     switch (message.type) {
       case 'success':
-        const pages = message.pages.map(page => 
+        const pages = message.pages.map(page =>
           `/api/comic-page/${cacheKey}/${encodeURIComponent(page)}`
         );
         res.json({ pages });
