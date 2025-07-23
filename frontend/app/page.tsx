@@ -208,6 +208,7 @@ function FileExplorerContent() {
   const [useBlur, setUseBlur] = useState(true);
   const [useDoubleClick, setUseDoubleClick] = useState(false);
   const [doubleClickAction, setDoubleClickAction] = useState<'imageOnly' | 'recursiveSearch' | 'refresh'>('recursiveSearch');
+  const [autoChangeView, setAutoChangeView] = useState(true);
 
   // EXPERIMENTAL FEATURE FOR FILE INDEXING
   const [useFileIndex, setUseFileIndex] = useState(false);
@@ -1461,10 +1462,26 @@ function FileExplorerContent() {
     }
   }, [isImageOnlyMode, useMasonry, viewMode, isLoadingMore, hasMoreFiles, loadNextPage]);
 
+  const [firstLoaded, setFirstLoaded] = useState(false);
+
   useEffect(() => {
     closePreview();
     setFocusedFileIndex(null);
+    setFirstLoaded(true);
   }, [currentPath, searchQuery])
+
+  useEffect(() => {
+    if (autoChangeView && !_isLoading && firstLoaded && accumulatedFiles.length > 0) {
+      const hasImage = accumulatedFiles.some(file => file.mimeType?.startsWith('image/'));
+      const hasVideo = accumulatedFiles.some(file => file.mimeType?.startsWith('video/'));
+      if (hasImage || hasVideo) {
+        setViewMode('image');
+      } else {
+        setViewMode('list');
+      }
+      setFirstLoaded(false);
+    }
+  }, [autoChangeView, _isLoading, firstLoaded, accumulatedFiles]);
 
   useEffect(() => {
     if (isChangingPath) {
@@ -2257,7 +2274,7 @@ function FileExplorerContent() {
                 <PopoverContent className="w-auto p-1 select-none">
                   <ScrollArea className="h-[50vh]">
                     <div className="grid gap-1">
-                      <div className="px-2 py-1 text-sm font-semibold flex justify-center md:hidden">View Mode</div>
+                      <div className="px-2 py-1 text-sm font-semibold flex justify-center">View Mode</div>
                       <Button variant={viewMode === 'list' ? 'default' : 'outline'} size="sm" className="justify-start md:hidden" onClick={() => setViewMode('list')}>
                         <ListIcon size={18} /> List View
                       </Button>
@@ -2266,6 +2283,9 @@ function FileExplorerContent() {
                       </Button>
                       <Button variant={viewMode === 'image' ? 'default' : 'outline'} size="sm" className="justify-start md:hidden" onClick={() => setViewMode('image')}>
                         <ImageIcon size={18} /> Image View
+                      </Button>
+                      <Button variant="outline" size="sm" className="justify-start" onClick={() => setAutoChangeView(!autoChangeView)}>
+                        <TestTube2 size={18} /> {autoChangeView ? 'Disable Auto Change View' : 'Enable Auto Change View'}
                       </Button>
 
                       <Separator className="my-1 md:hidden" />

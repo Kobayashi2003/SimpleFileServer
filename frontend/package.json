@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev --turbopack --port 2712 -H localhost",
     "dev:global": "next dev --turbopack --port 2712 -H 0.0.0.0",
-    "dev:noturbopack": "next dev --port 2712 -H 0.0.0.0",
+    "dev:noturbopack": "next dev --port 2712 -H localhost",
+    "dev:noturbopack_global": "next dev --port 2712 -H 0.0.0.0",
     "build": "next build",
     "start": "next start --port 2711 -H 0.0.0.0",
     "lint": "next lint"

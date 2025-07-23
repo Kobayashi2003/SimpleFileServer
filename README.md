@@ -283,6 +283,10 @@ USE_MIME_MAGIC=true
   - [x] api/comic-page
   - [x] api/download
   - [x] api/raw（但是psd部分的处理仍需改进）
+  - [x] api/comic
+
+- [ ] **TODO**:为Comic Preview添加进度记忆
+- [ ] **TODO**:为Comic Preview添加进度条
 
 ## BUG
 

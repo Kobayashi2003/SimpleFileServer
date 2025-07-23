@@ -1,6 +1,6 @@
 const config = require('../config');
 const utils = require('../utils');
-const { handleError } = require('../wapper/errorHandler');
+const { handleError } = require('../wappers/errorHandler');
 
 const fs = require('fs');
 const path = require('path');
@@ -46,20 +46,21 @@ router.get('/raw', handleError(async (req, res) => {
           break;
 
         case 'error':
-          // res.status(500).json({ error: message.error });
-          res.status(500).json({ error: 'Failed to download files' });
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to download files' });
+          }
           break;
       }
     });
 
     worker.on('error', (error) => {
-      // res.status(500).json({ error: error.message });
-      res.status(500).json({ error: 'Failed to download files' });
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to download files' });
+      }
     });
 
     worker.on('exit', (code) => {
-      if (code !== 0) {
-        // res.status(500).json({ error: `Worker stopped with exit code ${code}` });
+      if (code !== 0 && !res.headersSent) {
         res.status(500).json({ error: 'Failed to download files' });
       }
     });
@@ -515,104 +516,67 @@ router.get('/thumbnail', handleError(async (req, res) => {
 router.get('/comic', handleError(async (req, res) => {
   const { path: requestedPath } = req.query;
 
-  if (!utils.isValidFilePathSync(requestedPath)) {
+  if (!( await utils.isValidFilePath(requestedPath)) ) {
     return res.status(400).json({ error: 'Invalid path provided' });
   }
 
   const fullPath = path.resolve(config.baseDirectory, requestedPath);
-  const stats = fs.statSync(fullPath);
+  const stats = await fs.promises.stat(fullPath);
   const extension = path.extname(fullPath).toLowerCase();
 
-
-  const tempDirBase = config.tempDirectory;
+  if (!['.cbz', '.cbr'].includes(extension)) {
+    return res.status(415).json({ error: 'Unsupported media type' });
+  }
 
   const crypto = require('crypto');
 
   const hashInput = `${fullPath}-${stats.mtimeMs}`;
   const cacheKey = crypto.createHash('md5').update(hashInput).digest('hex');
-  const cacheDir = path.join(tempDirBase, 'comic', `${cacheKey}`);
+  const cacheDir = path.join(config.tempDirectory, 'comic', cacheKey);
 
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir, { recursive: true });
   }
 
-  const pages = [];
-
-  if (extension === '.cbz') {
-    // Handle CBZ files (ZIP format)
-    const AdmZip = require('adm-zip');
-
-    const zip = new AdmZip(fullPath);
-    const entries = zip.getEntries();
-
-    const imageEntries = entries.filter(entry => {
-      const ext = path.extname(entry.entryName).toLowerCase();
-      return ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)
-        && pages.push(entry.entryName);
-    });
-
-    // Extract and create URLs for each image
-    for (let i = 0; i < imageEntries.length; i++) {
-      const entry = imageEntries[i];
-      const entryPath = path.join(cacheDir, entry.entryName);
-
-      zip.extractEntryTo(entry, cacheDir, false, true);
-
-      if (!fs.existsSync(entryPath)) {
-        continue;
-      }
+  const worker = new Worker(path.join(__dirname, '../workers/comicWorker.js'), {
+    workerData: { 
+      filePath: fullPath, 
+      cacheDir: cacheDir, 
+      extension: extension 
     }
-  }
+  });
 
-  if (extension === '.cbr') {
-    // Handle CBR files (RAR format)
-    const unrar = require('node-unrar-js');
+  worker.on('message', (message) => {
+    switch (message.type) {
+      case 'success':
+        const pages = message.pages.map(page => 
+          `/api/comic-page/${cacheKey}/${encodeURIComponent(page)}`
+        );
+        res.json({ pages });
+        break;
 
-    const rarData = fs.readFileSync(fullPath);
-
-    const extractor = await unrar.createExtractorFromData({
-      data: rarData.buffer,
-      password: undefined // Add password here if needed
-    });
-
-    const extracted = extractor.extract();
-    const extractedFiles = [...extracted.files];
-
-    for (const file of extractedFiles) {
-      const ext = path.extname(file.fileHeader.name).toLowerCase();
-      if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext) && file.extraction) {
-
-        pages.push(entryPath);
-
-        const entryPath = path.join(cacheDir, file.fileHeader.name);
-        fs.writeFileSync(entryPath, file.extraction);
-      }
+      case 'error':
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to process comic file' });
+        }
+        break;
     }
-  }
+  });
 
-  if (pages.length > 0) {
-    pages.sort((a, b) => {
-      // Extract numbers from filenames for natural sorting
-      const aMatch = a.match(/(\d+)/g);
-      const bMatch = b.match(/(\d+)/g);
+  worker.on('error', (error) => {
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to process comic file' });
+    }
+  });
 
-      if (aMatch && bMatch) {
-        const aNum = parseInt(aMatch[aMatch.length - 1]);
-        const bNum = parseInt(bMatch[bMatch.length - 1]);
-        return aNum - bNum;
-      }
+  worker.on('exit', (code) => {
+    if (code !== 0 && !res.headersSent) {
+      res.status(500).json({ error: 'Failed to process comic file' });
+    }
+  });
 
-      return a.localeCompare(b);
-    });
-
-    pages.forEach((page, index) => {
-      pages[index] = `/api/comic-page/${cacheKey}/${encodeURIComponent(page)}`;
-    });
-
-    return res.json({ pages });
-  }
-
-  return res.status(415).json({ error: 'Unsupported media type' });
+  req.on('close', () => worker.terminate());
+  req.on('aborted', () => worker.terminate());
 }));
 
 router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
@@ -673,7 +637,7 @@ router.get('/comic-page/:cacheKey/:page', handleError(async (req, res) => {
   req.on('close', () => readStream.destroy());
   req.on('aborted', () => readStream.destroy());
 
-  stream.pipe(res);
+  readStream.pipe(res);
 }));
 
 router.get('/archive', handleError((req, res) => {

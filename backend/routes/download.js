@@ -57,20 +57,21 @@ router.post('/download', async (req, res) => {
         break;
 
       case 'error':
-        // res.status(500).json({ error: message.error });
-        res.status(500).json({ error: 'Failed to download files' });
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to download files' });
+        }
         break;
     }
   });
 
   worker.on('error', (error) => {
-    // res.status(500).json({ error: error.message });
-    res.status(500).json({ error: 'Failed to download files' });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to download files' });
+    }
   });
 
   worker.on('exit', (code) => {
-    if (code !== 0) {
-      // res.status(500).json({ error: `Worker stopped with exit code ${code}` });
+    if (code !== 0 && !res.headersSent) {
       res.status(500).json({ error: 'Failed to download files' });
     }
   });
