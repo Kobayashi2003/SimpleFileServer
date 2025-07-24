@@ -588,7 +588,7 @@ function findMediaInIndex(directory = '', mediaType = 'image', options = {}) {
       SELECT *
       FROM files
       WHERE ${conditions.join(" AND ")}
-      ${getOrderByClause(sortBy, sortOrder)}
+      ${getOrderByClause(sortBy === 'name' ? 'path' : sortBy, sortOrder)}
       ${page ? `LIMIT ${limit} OFFSET ${(page - 1) * limit}` : ""}
     `;
 
